@@ -1,0 +1,48 @@
+
+[package]
+name = "ruggine_modulare"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.37", features = ["full"] }
+iced = { version = "0.12", features = ["tokio", "debug"] }
+clap = { version = "4.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+env_logger = "0.10"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+sysinfo = "0.30"
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "macros"] }
+anyhow = "1.0"
+dotenvy = "0.15"
+thiserror = "1.0"
+async-trait = "0.1"
+argon2 = "0.5"
+rand = "0.8"
+ring = "0.17"
+base64 = "0.22"
+md5 = "0.7"
+
+[features]
+default = ["client", "server"]
+server = []
+client = []
+
+[lib]
+name = "ruggine_modulare"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ruggine-server"
+path = "src/server/main.rs"
+
+[[bin]]
+name = "ruggine-gui"
+path = "src/main.rs"
+
+# Target cross-platform
+[package.metadata]
+targets = ["x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu", "x86_64-apple-darwin"]
