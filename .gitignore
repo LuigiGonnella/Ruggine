@@ -1,1 +1,40 @@
-target/
+# Rust/Cargo generated files
+**/target/
+**/*.rs.bk
+**/Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Runtime generated files
+**/ruggine_data.json
+**/ruggine_performance.log
+*.log
+
+# Database files (commentato - vogliamo tracciare il database statico)
+# data/
+# *.db
+# *.sqlite
+# *.sqlite3
+
+# Environment files (commentato - vogliamo tracciare .env per collaborazione)
+# .env
+# .env.local
+# .env.production
+
+# Temporary files
+*.tmp
+*.temp
