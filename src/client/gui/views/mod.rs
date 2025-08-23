@@ -1,3 +1,4 @@
+pub mod logger;
 pub mod registration;
 pub mod main_actions;
 pub mod private_chat;

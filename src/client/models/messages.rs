@@ -15,4 +15,5 @@ pub enum Message {
     LogInfo(String),
     LogSuccess(String),
     LogError(String),
+    ToggleShowPassword,
 }

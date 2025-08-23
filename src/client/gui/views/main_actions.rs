@@ -8,8 +8,13 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
     let welcome = state.welcome_message.clone().unwrap_or_else(|| "Benvenuto!".to_string());
     let logout_button = Button::new(Text::new("Logout")).on_press(Message::Logout);
     let log_area = Column::with_children(
-        state.log_messages.iter().rev().take(10).map(|(msg, color)| {
-            Text::new(msg).style(iced::theme::Text::Color(*color)).into()
+        state.logger.iter().rev().take(10).map(|log| {
+            Text::new(&log.message).style(match log.level {
+                crate::client::gui::views::logger::LogLevel::Success => Color::from_rgb(0.0, 0.7, 0.0),
+                crate::client::gui::views::logger::LogLevel::Error => Color::from_rgb(1.0, 0.0, 0.0),
+                crate::client::gui::views::logger::LogLevel::Info => Color::from_rgb(0.0, 0.0, 1.0),
+                crate::client::gui::views::logger::LogLevel::Warning => Color::from_rgb(1.0, 0.8, 0.0),
+            }).into()
         }).collect::<Vec<_>>()
     ).spacing(2);
 

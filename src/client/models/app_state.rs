@@ -17,6 +17,7 @@ impl Default for AppState {
 
 
 use crate::client::gui::views::registration::HostType;
+use crate::client::gui::views::logger::LogMessage;
 
 #[derive(Debug, Clone, Default)]
 pub struct ChatAppState {
@@ -28,9 +29,10 @@ pub struct ChatAppState {
     pub is_login: bool,
     pub error_message: Option<String>,
     pub loading: bool,
-    pub log_messages: Vec<(String, iced::Color)>,
+    pub logger: Vec<LogMessage>,
     pub welcome_message: Option<String>,
     pub session_token: Option<String>,
+    pub show_password: bool, // aggiunto per toggle password
 }
 
 impl ChatAppState {
@@ -42,11 +44,11 @@ impl ChatAppState {
             Msg::HostSelected(host) => self.selected_host = host,
             Msg::ManualHostChanged(val) => self.manual_host = val,
             Msg::ToggleLoginRegister => self.is_login = !self.is_login,
+            Msg::ToggleShowPassword => self.show_password = !self.show_password,
             Msg::SubmitLoginOrRegister => {
                 self.loading = true;
                 self.error_message = None;
                 // Qui va la logica di invio comando al server tramite chat_service
-                // Esempio: chat_service.login_or_register(...)
             }
             Msg::AuthResult { success, message, token } => {
                 self.loading = false;
@@ -54,21 +56,41 @@ impl ChatAppState {
                     self.session_token = token;
                     self.welcome_message = Some(message.clone());
                     self.app_state = AppState::MainActions;
-                    self.log_messages.push((format!("[SUCCESS] {}", message), iced::Color::from_rgb(0.0, 0.7, 0.0)));
+                    let action = if self.is_login { "Login" } else { "Registrazione" };
+                    self.logger.push(crate::client::gui::views::logger::LogMessage {
+                        level: crate::client::gui::views::logger::LogLevel::Success,
+                        message: format!("{} effettuato con successo! Benvenuto, {}.", action, self.username),
+                    });
                 } else {
                     self.error_message = Some(message.clone());
-                    self.log_messages.push((format!("[ERROR] {}", message), iced::Color::from_rgb(1.0, 0.0, 0.0)));
+                    let action = if self.is_login { "Login" } else { "Registrazione" };
+                    self.logger.push(crate::client::gui::views::logger::LogMessage {
+                        level: crate::client::gui::views::logger::LogLevel::Error,
+                        message: format!("{} fallito: {}", action, message),
+                    });
                 }
             }
             Msg::Logout => {
                 self.session_token = None;
                 self.app_state = AppState::Registration;
                 self.welcome_message = None;
-                self.log_messages.push(("Logout effettuato".to_string(), iced::Color::from_rgb(0.0, 0.0, 1.0)));
+                self.logger.push(crate::client::gui::views::logger::LogMessage {
+                    level: crate::client::gui::views::logger::LogLevel::Info,
+                    message: "Logout effettuato con successo.".to_string(),
+                });
             }
-            Msg::LogInfo(msg) => self.log_messages.push((msg, iced::Color::from_rgb(0.0, 0.0, 1.0))),
-            Msg::LogSuccess(msg) => self.log_messages.push((msg, iced::Color::from_rgb(0.0, 0.7, 0.0))),
-            Msg::LogError(msg) => self.log_messages.push((msg, iced::Color::from_rgb(1.0, 0.0, 0.0))),
+            Msg::LogInfo(msg) => self.logger.push(crate::client::gui::views::logger::LogMessage {
+                level: crate::client::gui::views::logger::LogLevel::Info,
+                message: msg,
+            }),
+            Msg::LogSuccess(msg) => self.logger.push(crate::client::gui::views::logger::LogMessage {
+                level: crate::client::gui::views::logger::LogLevel::Success,
+                message: msg,
+            }),
+            Msg::LogError(msg) => self.logger.push(crate::client::gui::views::logger::LogMessage {
+                level: crate::client::gui::views::logger::LogLevel::Error,
+                message: msg,
+            }),
             _ => {}
         }
         iced::Command::none()

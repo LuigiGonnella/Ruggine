@@ -42,7 +42,11 @@ impl Application for ChatApp {
                 let is_login = self.state.is_login;
                 self.state.loading = true;
                 self.state.error_message = None;
-                self.state.log_messages.push((format!("Connessione a {}...", host), iced::Color::from_rgb(0.0, 0.0, 1.0)));
+                use crate::client::gui::views::logger::{LogMessage, LogLevel};
+                self.state.logger.push(LogMessage {
+                    level: LogLevel::Info,
+                    message: format!("Connessione a {}...", host),
+                });
                 // Esegui la connessione e invia il comando
                 return Command::perform(
                     async move {

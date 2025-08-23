@@ -1,7 +1,8 @@
-use iced::{Element, Length, Alignment, Color, Background, Border, Theme};
+use iced::{Element, Length, Alignment, Color, Background, Border, Theme, Font};
 use iced::widget::{Column, Row, Text, TextInput, Button, PickList, Container, Space};
 use crate::client::models::messages::Message;
 use crate::client::models::app_state::ChatAppState;
+use crate::client::gui::views::logger::logger_view;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostType {
@@ -50,6 +51,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
     let is_login = state.is_login;
     let error_message = state.error_message.clone();
     let loading = state.loading;
+    let show_password = state.show_password; // aggiungi show_password a ChatAppState
 
     // Validazione
     let username_valid = !username.is_empty() && username.len() >= 3 && username.chars().all(|c| c.is_alphanumeric());
@@ -86,7 +88,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
     // Title
     let title = Text::new("Ruggine")
         .size(36)
-        .style(Color::from_rgb(1.0, 1.0, 1.0))
+        .style(Color::from_rgb(0.18, 0.22, 0.28)) // blu scuro
         .horizontal_alignment(iced::alignment::Horizontal::Center);
 
     // Tabs - usando stili built-in
@@ -94,7 +96,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         Button::new(
             Text::new("Login")
                 .horizontal_alignment(iced::alignment::Horizontal::Center)
-                .style(Color::from_rgb(1.0, 1.0, 1.0))
+                .style(Color::from_rgb(0.18, 0.22, 0.28)) // blu scuro
         )
         .style(iced::theme::Button::Primary)
         .width(Length::Fill)
@@ -103,7 +105,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         Button::new(
             Text::new("Login")
                 .horizontal_alignment(iced::alignment::Horizontal::Center)
-                .style(Color::from_rgb(0.6, 0.7, 0.8))
+                .style(Color::from_rgb(0.4, 0.45, 0.5)) // grigio scuro
         )
         .on_press(Message::ToggleLoginRegister)
         .style(iced::theme::Button::Secondary)
@@ -115,7 +117,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         Button::new(
             Text::new("Register")
                 .horizontal_alignment(iced::alignment::Horizontal::Center)
-                .style(Color::from_rgb(1.0, 1.0, 1.0))
+                .style(Color::from_rgb(0.18, 0.22, 0.28)) // blu scuro
         )
         .style(iced::theme::Button::Primary)
         .width(Length::Fill)
@@ -124,7 +126,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         Button::new(
             Text::new("Register")
                 .horizontal_alignment(iced::alignment::Horizontal::Center)
-                .style(Color::from_rgb(0.6, 0.7, 0.8))
+                .style(Color::from_rgb(0.4, 0.45, 0.5)) // grigio scuro
         )
         .on_press(Message::ToggleLoginRegister)
         .style(iced::theme::Button::Secondary)
@@ -145,9 +147,19 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
 
     let password_input = TextInput::new("Password", password)
         .on_input(Message::PasswordChanged)
-        .password()
+        .secure(!show_password)
         .width(Length::Fill)
         .padding(12);
+    let toggle_button = Button::new(
+        Text::new(if show_password { "🙈" } else { "👁️" })
+            .font(Font::with_name("Segoe UI Emoji"))
+    )
+    .on_press(Message::ToggleShowPassword)
+    .padding([0, 8]);
+    // Rimossa password_overlay, ora non serve più
+    let password_row = Row::new()
+        .push(password_input)
+        .push(toggle_button);
 
     // Submit button
     let submit_button = if submit_enabled {
@@ -202,9 +214,10 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .push(tabs)
         .push(Space::new(Length::Fill, Length::Fixed(20.0)))
         .push(email_input)
-        .push(password_input)
+        .push(password_row)
         .push(Space::new(Length::Fill, Length::Fixed(10.0)))
         .push(submit_button)
+        .push(logger_view(&state.logger))
         .push(error_element)
         .push(loading_element);
 
