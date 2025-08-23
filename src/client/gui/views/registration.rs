@@ -183,15 +183,8 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .padding(12)
     };
 
-    // Error message
-    let error_element: Element<Message> = if let Some(msg) = error_message {
-        Text::new(msg)
-            .style(Color::from_rgb(1.0, 0.4, 0.4))
-            .horizontal_alignment(iced::alignment::Horizontal::Center)
-            .into()
-    } else {
-        Space::new(Length::Fill, Length::Fixed(0.0)).into()
-    };
+    // We use the top logger bar for errors; keep a hidden spacer here to preserve layout
+    let error_element: Element<Message> = Space::new(Length::Fill, Length::Fixed(0.0)).into();
 
     // Loading indicator
     let loading_element: Element<Message> = if loading {
@@ -216,8 +209,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .push(email_input)
         .push(password_row)
         .push(Space::new(Length::Fill, Length::Fixed(10.0)))
-        .push(submit_button)
-        .push(logger_view(&state.logger))
+    .push(submit_button)
         .push(error_element)
         .push(loading_element);
 
@@ -230,6 +222,12 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
     let main_content = Column::new()
         .width(Length::Fill)
         .height(Length::Fill)
+        // Top logger bar
+        .push(
+            Container::new(crate::client::gui::views::logger::logger_view(&state.logger))
+                .width(Length::Fill)
+                .padding([8, 12, 0, 12])
+        )
         .push(
             Container::new(host_selector)
                 .width(Length::Fill)

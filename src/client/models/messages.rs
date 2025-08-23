@@ -12,6 +12,8 @@ pub enum Message {
     ToggleLoginRegister,
     SubmitLoginOrRegister,
     AuthResult { success: bool, message: String, token: Option<String> },
+    SessionMissing,
+    ClearLog,
     LogInfo(String),
     LogSuccess(String),
     LogError(String),

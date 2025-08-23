@@ -17,6 +17,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // load .env for development configuration
+    let _ = dotenvy::dotenv();
     env_logger::init();
     let args = Args::parse();
     let config = ServerConfig::from_env();
@@ -57,7 +59,24 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting ruggine_modulare server on {}:{}", args.host, args.port);
     let db = Arc::new(Database::connect(&config.database_url).await?);
     db.migrate().await?;
-    let server = Server { db, config };
+    let server = Server { db: db.clone(), config: config.clone() };
+
+    // Spawn periodic cleanup of expired sessions (runs every hour)
+    let cleaner_db = db.clone();
+    tokio::spawn(async move {
+        loop {
+            ruggine_modulare::server::auth::cleanup_expired_sessions(cleaner_db.clone()).await;
+            tokio::time::sleep(std::time::Duration::from_secs(60 * 60)).await;
+        }
+    });
+
+    // TLS hint for the operator
+    if config.enable_encryption {
+        log::info!("TLS is enabled; set TLS_CERT_PATH and TLS_KEY_PATH env vars to point to cert and key PEM files.");
+    } else {
+        log::info!("TLS is disabled; connections will be plain TCP.");
+    }
+
     server.run(&format!("{}:{}", args.host, args.port)).await?;
     Ok(())
 }

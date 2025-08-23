@@ -51,24 +51,25 @@ impl LogMessage {
 }
 
 pub fn logger_view(messages: &[LogMessage]) -> Element<'_, crate::client::models::messages::Message> {
-    let mut col = iced::widget::Column::new().spacing(8);
-    for log in messages.iter().rev().take(3) {
-        col = col.push(
-            Container::new(
-                Row::new()
-                    .spacing(8)
-                    .push(
-                        Text::new(log.emoji())
-                            .font(Font::with_name("Segoe UI Emoji"))
-                            .size(20)
-                            .style(log.color())
-                    )
-                    .push(Text::new(&log.message).size(16))
+    // Show only the latest message as an alert bar (single message at a time)
+    if let Some(log) = messages.iter().rev().next() {
+        let row = Row::new()
+            .spacing(12)
+            .push(
+                Text::new(log.emoji())
+                    .font(Font::with_name("Segoe UI Emoji"))
+                    .size(20)
+                    .style(log.color())
             )
-            .padding([6, 12])
+            .push(Text::new(&log.message).size(18).style(log.color()));
+
+        Container::new(row)
+            .padding([8, 16])
             .width(Length::Fill)
             .style(iced::theme::Container::Box)
-        );
+            .into()
+    } else {
+        // Empty placeholder
+        iced::widget::Space::new(iced::Length::Fill, iced::Length::Fixed(0.0)).into()
     }
-    col.into()
 }

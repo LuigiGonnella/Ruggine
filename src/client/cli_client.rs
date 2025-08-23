@@ -5,6 +5,8 @@ use crate::server::config::ClientConfig;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // load .env variables so KEYRING_FALLBACK can be set there for development
+    let _ = dotenvy::dotenv();
     let client_config = ClientConfig::from_env();
     let addr = std::env::args().nth(1).unwrap_or_else(|| format!("{}:{}", client_config.default_host, client_config.default_port));
     println!("[CLIENT] Benvenuto! Digita i comandi (es: /register user pass, /login user pass):");
@@ -135,11 +137,20 @@ async fn main() -> anyhow::Result<()> {
             println!("[CLIENT] Server disconnesso");
             break;
         }
-        let response = server_line.trim();
-        println!("[SERVER] {}", response);
+        let raw_response = server_line.trim().to_string();
+        // Do not print raw server lines that may contain session tokens. Show sanitized messages instead.
+        let cleaned = raw_response.split("SESSION:").next().map(|s| s.trim()).unwrap_or("");
+        if cleaned.starts_with("OK:") {
+            // display only the human-friendly part after OK:
+            println!("[SERVER] {}", cleaned.trim_start_matches("OK:").trim());
+        } else if cleaned.starts_with("ERR:") {
+            println!("[SERVER][ERROR] {}", cleaned.trim_start_matches("ERR:").trim());
+        } else {
+            println!("[SERVER] {}", cleaned);
+        }
         // Estrai session_token dopo login
-        if command == "/login" && response.contains("SESSION:") {
-            if let Some(line) = response.lines().find(|l| l.contains("SESSION:")) {
+        if command == "/login" && raw_response.contains("SESSION:") {
+            if let Some(line) = raw_response.lines().find(|l| l.contains("SESSION:")) {
                 if let Some(token) = line.split("SESSION:").nth(1) {
                     session_token = Some(token.trim().to_string());
                     println!("[CLIENT] Login effettuato! Sessione attiva.");
@@ -147,7 +158,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         // Cancella session_token dopo logout
-        if command == "/logout" && response.starts_with("OK: Logout") {
+        if command == "/logout" && raw_response.starts_with("OK: Logout") {
             session_token = None;
             println!("[CLIENT] Logout effettuato. Sessione terminata.");
         }

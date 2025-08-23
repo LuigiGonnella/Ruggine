@@ -21,11 +21,20 @@ pub async fn logout(db: Arc<Database>, session_token: &str) -> String {
                 .bind(session_token)
                 .execute(&db.pool)
                 .await;
-            // Imposta utente offline
-            let _ = sqlx::query("UPDATE users SET is_online = 0 WHERE id = ?")
+            // Imposta utente offline solo se non ci sono altre sessioni attive
+            let other = sqlx::query("SELECT COUNT(1) as cnt FROM sessions WHERE user_id = ?")
                 .bind(&user_id)
-                .execute(&db.pool)
+                .fetch_one(&db.pool)
                 .await;
+            if let Ok(r) = other {
+                let cnt: i64 = r.get("cnt");
+                if cnt == 0 {
+                    let _ = sqlx::query("UPDATE users SET is_online = 0 WHERE id = ?")
+                        .bind(&user_id)
+                        .execute(&db.pool)
+                        .await;
+                }
+            }
             println!("[AUTH] Logout success for user_id={}", user_id);
             "OK: Logout effettuato".to_string()
         }
@@ -93,9 +102,27 @@ pub async fn register(db: Arc<Database>, username: &str, password: &str, config:
                 .execute(&mut *tx)
                 .await
                 .ok();
+            // Imposta utente online e crea sessione subito dopo la registrazione
+            sqlx::query("UPDATE users SET is_online = 1 WHERE id = ?")
+                .bind(&user_id)
+                .execute(&mut *tx)
+                .await
+                .ok();
+            // Crea sessione come nel login
+            let session_token = generate_session_token();
+            let now = chrono::Utc::now().timestamp();
+            let expires = now + 60*60*24*config.session_expiry_days as i64;
+            sqlx::query("INSERT INTO sessions (user_id, session_token, created_at, expires_at) VALUES (?, ?, ?, ?)")
+                .bind(&user_id)
+                .bind(&session_token)
+                .bind(now)
+                .bind(expires)
+                .execute(&mut *tx)
+                .await
+                .ok();
             tx.commit().await.ok();
             println!("[AUTH] Registered user {} (id={})", username, user_id);
-            format!("OK: Registered as {}", username)
+            format!("OK: Registered as {} SESSION: {}", username, session_token)
         }
         Err(e) => {
             println!("[AUTH] Registration failed for {}: {}", username, e);
@@ -133,7 +160,7 @@ pub async fn login(db: Arc<Database>, username: &str, password: &str, config: &S
                     .await
                     .ok();
                 println!("[AUTH] Login success for {} (id={})", username, user_id);
-                format!("OK: Logged in as {}\nSESSION: {}", username, session_token)
+                format!("OK: Logged in as {} SESSION: {}", username, session_token)
             } else {
                 println!("[AUTH] Login failed for {}: wrong password", username);
                 "ERR: Wrong password".to_string()
@@ -159,4 +186,17 @@ pub async fn validate_session(db: Arc<Database>, session_token: &str) -> Option<
         .await
         .ok()?;
     row.map(|r| r.get::<String,_>("user_id"))
+}
+
+/// Rimuove le sessioni scadute dal DB. Idempotente e sicuro da eseguire periodicamente.
+pub async fn cleanup_expired_sessions(db: Arc<Database>) {
+    let now = chrono::Utc::now().timestamp();
+    match sqlx::query("DELETE FROM sessions WHERE expires_at <= ?")
+        .bind(now)
+        .execute(&db.pool)
+        .await
+    {
+        Ok(res) => println!("[AUTH] Cleaned up {} expired sessions", res.rows_affected()),
+        Err(e) => println!("[AUTH] Failed to cleanup sessions: {}", e),
+    }
 }

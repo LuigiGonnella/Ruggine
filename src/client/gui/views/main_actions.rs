@@ -5,30 +5,17 @@ use crate::client::models::messages::Message;
 use crate::client::models::app_state::ChatAppState;
 
 pub fn view(state: &ChatAppState) -> Element<Message> {
-    let welcome = state.welcome_message.clone().unwrap_or_else(|| "Benvenuto!".to_string());
     let logout_button = Button::new(Text::new("Logout")).on_press(Message::Logout);
-    let log_area = Column::with_children(
-        state.logger.iter().rev().take(10).map(|log| {
-            Text::new(&log.message).style(match log.level {
-                crate::client::gui::views::logger::LogLevel::Success => Color::from_rgb(0.0, 0.7, 0.0),
-                crate::client::gui::views::logger::LogLevel::Error => Color::from_rgb(1.0, 0.0, 0.0),
-                crate::client::gui::views::logger::LogLevel::Info => Color::from_rgb(0.0, 0.0, 1.0),
-                crate::client::gui::views::logger::LogLevel::Warning => Color::from_rgb(1.0, 0.8, 0.0),
-            }).into()
-        }).collect::<Vec<_>>()
-    ).spacing(2);
 
     let content = Column::new()
-        .push(Text::new(welcome).size(32).style(Color::from_rgb(0.0, 0.7, 0.0)))
+        // Top logger bar
+        .push(crate::client::gui::views::logger::logger_view(&state.logger))
         .push(Space::new(Length::Fill, Length::Fixed(10.0)))
         .push(Row::new()
             .push(logout_button)
             .push(Space::new(Length::Fixed(20.0), Length::Fill))
             .push(Text::new("[Placeholder] Chat, Amici, ecc.").style(Color::from_rgb(0.3, 0.3, 0.3)))
         )
-        .push(Space::new(Length::Fill, Length::Fixed(20.0)))
-        .push(Text::new("Log eventi:").size(18))
-        .push(log_area)
         .align_items(Alignment::Center)
         .spacing(10);
 
