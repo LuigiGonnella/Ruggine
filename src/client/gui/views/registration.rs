@@ -1,6 +1,6 @@
-use iced::{Element, Length, Alignment, Color, Background};
+use iced::{Element, Length, Alignment, Color, Background, Border};
 use iced::widget::{Column, Row, Text, TextInput, Button, PickList, Container, Space};
-use iced::widget::{button, container};
+use iced::widget::{button, container, text_input};
 use crate::client::models::messages::Message;
 use crate::client::models::app_state::ChatAppState;
 
@@ -14,13 +14,12 @@ pub enum HostType {
 impl ToString for HostType {
     fn to_string(&self) -> String {
         match self {
-            HostType::Localhost => "localhost".to_string(),
-            HostType::Remote => "remote host".to_string(),
-            HostType::Manual => "manual".to_string(),
+            HostType::Localhost => "Localhost".to_string(),
+            HostType::Remote => "Remote".to_string(),
+            HostType::Manual => "Manual".to_string(),
         }
     }
 }
-
 
 const ALL_HOSTS: [HostType; 3] = [HostType::Localhost, HostType::Remote, HostType::Manual];
 
@@ -31,9 +30,9 @@ impl HostType {
 
     pub fn to_str(&self) -> &'static str {
         match self {
-            HostType::Localhost => "localhost",
-            HostType::Remote => "remote host",
-            HostType::Manual => "manual",
+            HostType::Localhost => "Localhost",
+            HostType::Remote => "Remote",
+            HostType::Manual => "Manual",
         }
     }
 }
@@ -44,163 +43,334 @@ impl Default for HostType {
     }
 }
 
+// Custom styles
+struct DarkContainerStyle;
+impl container::StyleSheet for DarkContainerStyle {
+    type Style = iced::Theme;
+    fn appearance(&self, _style: &Self::Style) -> container::Appearance {
+        container::Appearance {
+            background: Some(Background::Color(Color::from_rgb(0.11, 0.15, 0.18))),
+            border: Border::default(),
+            ..Default::default()
+        }
+    }
+}
+
+struct CardStyle;
+impl container::StyleSheet for CardStyle {
+    type Style = iced::Theme;
+    fn appearance(&self, _style: &Self::Style) -> container::Appearance {
+        container::Appearance {
+            background: Some(Background::Color(Color::from_rgb(0.15, 0.20, 0.24))),
+            border: Border {
+                radius: 12.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+}
+
+struct InputStyle;
+impl text_input::StyleSheet for InputStyle {
+    type Style = iced::Theme;
+    
+    fn active(&self, _style: &Self::Style) -> text_input::Appearance {
+        text_input::Appearance {
+            background: Background::Color(Color::from_rgb(0.20, 0.26, 0.30)),
+            border: Border {
+                radius: 8.0.into(),
+                width: 1.0,
+                color: Color::from_rgb(0.25, 0.31, 0.35),
+            },
+            icon_color: Color::from_rgb(0.6, 0.7, 0.8),
+        }
+    }
+    
+    fn focused(&self, style: &Self::Style) -> text_input::Appearance {
+        let mut appearance = self.active(style);
+        appearance.border.color = Color::from_rgb(0.0, 0.68, 0.9);
+        appearance
+    }
+    
+    fn placeholder_color(&self, _style: &Self::Style) -> Color {
+        Color::from_rgb(0.5, 0.6, 0.7)
+    }
+    
+    fn value_color(&self, _style: &Self::Style) -> Color {
+        Color::from_rgb(0.9, 0.95, 1.0)
+    }
+    
+    fn disabled_color(&self, _style: &Self::Style) -> Color {
+        Color::from_rgb(0.4, 0.5, 0.6)
+    }
+    
+    fn selection_color(&self, _style: &Self::Style) -> Color {
+        Color::from_rgb(0.0, 0.68, 0.9)
+    }
+    
+    fn disabled(&self, style: &Self::Style) -> text_input::Appearance {
+        self.active(style)
+    }
+    
+    fn hovered(&self, style: &Self::Style) -> text_input::Appearance {
+        self.active(style)
+    }
+}
+
+struct PrimaryButtonStyle;
+impl button::StyleSheet for PrimaryButtonStyle {
+    type Style = iced::Theme;
+    
+    fn active(&self, _style: &Self::Style) -> button::Appearance {
+        button::Appearance {
+            background: Some(Background::Color(Color::from_rgb(0.0, 0.68, 0.9))),
+            text_color: Color::from_rgb(1.0, 1.0, 1.0),
+            border: Border {
+                radius: 8.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+    
+    fn hovered(&self, _style: &Self::Style) -> button::Appearance {
+        button::Appearance {
+            background: Some(Background::Color(Color::from_rgb(0.0, 0.75, 0.95))),
+            text_color: Color::from_rgb(1.0, 1.0, 1.0),
+            border: Border {
+                radius: 8.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+    
+    fn pressed(&self, style: &Self::Style) -> button::Appearance {
+        self.hovered(style)
+    }
+    
+    fn disabled(&self, _style: &Self::Style) -> button::Appearance {
+        button::Appearance {
+            background: Some(Background::Color(Color::from_rgb(0.3, 0.4, 0.5))),
+            text_color: Color::from_rgb(0.6, 0.7, 0.8),
+            border: Border {
+                radius: 8.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+}
+
+struct TabButtonStyle {
+    is_active: bool,
+}
+
+impl button::StyleSheet for TabButtonStyle {
+    type Style = iced::Theme;
+    
+    fn active(&self, _style: &Self::Style) -> button::Appearance {
+        button::Appearance {
+            background: None,
+            text_color: if self.is_active {
+                Color::from_rgb(1.0, 1.0, 1.0)
+            } else {
+                Color::from_rgb(0.6, 0.7, 0.8)
+            },
+            border: Border {
+                width: if self.is_active { 2.0 } else { 0.0 },
+                color: Color::from_rgb(0.0, 0.68, 0.9),
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        }
+    }
+    
+    fn hovered(&self, style: &Self::Style) -> button::Appearance {
+        let mut appearance = self.active(style);
+        appearance.text_color = Color::from_rgb(1.0, 1.0, 1.0);
+        appearance
+    }
+    
+    fn pressed(&self, style: &Self::Style) -> button::Appearance {
+        self.hovered(style)
+    }
+    
+    fn disabled(&self, style: &Self::Style) -> button::Appearance {
+        self.active(style)
+    }
+}
+
 pub fn view(state: &ChatAppState) -> Element<Message> {
     let username = &state.username;
     let password = &state.password;
-    let selected_host = state.selected_host.clone(); // Assicurati che ChatAppState usi HostType da registration.rs
+    let selected_host = state.selected_host.clone();
     let manual_host = &state.manual_host;
     let is_login = state.is_login;
     let error_message = state.error_message.clone();
     let loading = state.loading;
-    let log_messages = &state.log_messages;
 
-    // Validazione username
+    // Validazione
     let username_valid = !username.is_empty() && username.len() >= 3 && username.chars().all(|c| c.is_alphanumeric());
-    let username_hint = if username.is_empty() {
-        "Inserisci uno username"
-    } else if username.len() < 3 {
-        "Minimo 3 caratteri"
-    } else if !username.chars().all(|c| c.is_alphanumeric()) {
-        "Solo caratteri alfanumerici"
-    } else {
-        "Username valido"
-    };
-    let username_hint_color = if username_valid { Color::from_rgb(0.0, 0.7, 0.0) } else { Color::from_rgb(1.0, 0.5, 0.0) };
-
-    // Validazione password
     let password_valid = !password.is_empty() && password.len() >= 6;
-    let password_hint = if password.is_empty() {
-        "Inserisci una password"
-    } else if password.len() < 6 {
-        "Minimo 6 caratteri"
-    } else {
-        "Password valida"
-    };
-    let password_hint_color = if password_valid { Color::from_rgb(0.0, 0.7, 0.0) } else { Color::from_rgb(1.0, 0.5, 0.0) };
-
-    // Pulsante submit abilitato solo se validi
     let submit_enabled = username_valid && password_valid && !loading;
 
-    let host_picklist = PickList::new(
-        &HostType::all()[..],
-        Some(selected_host.clone()),
-        Message::HostSelected,
-    );
+    // Host selector in top right
+    let host_selector = Container::new(
+        PickList::new(
+            &HostType::all()[..],
+            Some(selected_host.clone()),
+            Message::HostSelected,
+        )
+        .placeholder("Select host")
+        .width(Length::Fixed(120.0))
+    )
+    .width(Length::Fill)
+    .align_x(iced::alignment::Horizontal::Right);
+
+    // Manual host input (if needed)
     let manual_host_input: Element<Message> = if selected_host == HostType::Manual {
         Container::new(
-            TextInput::new("Host...", manual_host)
+            TextInput::new("Enter host...", manual_host)
                 .on_input(Message::ManualHostChanged)
-        ).into()
-    } else {
-        Container::new(Space::new(Length::Fill, Length::Fixed(0.0))).into()
-    };
-
-    let username_input = TextInput::new("Username", username)
-        .on_input(Message::UsernameChanged);
-    let username_hint_text = Text::new(username_hint).style(username_hint_color);
-    let password_input = TextInput::new("Password", password)
-        .on_input(Message::PasswordChanged);
-    let password_hint_text = Text::new(password_hint).style(password_hint_color);
-
-    let submit_button = if submit_enabled {
-        Button::new(Text::new(if is_login { "Login" } else { "Registrati" }))
-            .on_press(Message::SubmitLoginOrRegister)
-    } else {
-        Button::new(Text::new(if is_login { "Login" } else { "Registrati" }))
-    };
-
-    let error_text = if let Some(msg) = error_message {
-        Text::new(msg).style(Color::from_rgb(1.0, 0.0, 0.0))
-    } else {
-        Text::new("")
-    };
-    let loading_text = if loading {
-        Text::new("Caricamento...").style(Color::from_rgb(0.5, 0.5, 1.0))
-    } else {
-        Text::new("")
-    };
-
-    let log_area = Column::with_children(
-        log_messages.iter().map(|(msg, color)| {
-            Text::new(msg).style(iced::theme::Text::Color(*color)).into()
-        }).collect::<Vec<_>>()
-    ).spacing(2);
-
-    // Build a centered auth card for a more professional initial screen
-    // --- styles -------------------------------------------------
-    struct CardStyle;
-    impl container::StyleSheet for CardStyle {
-        type Style = iced::Theme;
-        fn appearance(&self, _style: &Self::Style) -> container::Appearance {
-            container::Appearance {
-                background: Some(Background::Color(Color { r: 0.09, g: 0.15, b: 0.18, a: 1.0 })),
-                ..Default::default()
-            }
-        }
-    }
-
-    struct PrimaryButtonStyle;
-    impl button::StyleSheet for PrimaryButtonStyle {
-        type Style = iced::Theme;
-        fn active(&self, _style: &Self::Style) -> button::Appearance {
-            button::Appearance {
-                background: Some(Background::Color(Color { r: 0.0, g: 0.68, b: 0.9, a: 1.0 })),
-                text_color: Color::from_rgb(0.0, 0.0, 0.0),
-                ..Default::default()
-            }
-        }
-        fn hovered(&self, style: &Self::Style) -> button::Appearance {
-            let mut s = self.active(style);
-            s.background = Some(Background::Color(Color { r: 0.0, g: 0.75, b: 0.95, a: 1.0 }));
-            s
-        }
-    }
-
-    struct TabButtonStyle;
-    impl button::StyleSheet for TabButtonStyle {
-        type Style = iced::Theme;
-        fn active(&self, _style: &Self::Style) -> button::Appearance {
-            button::Appearance {
-                background: Some(Background::Color(Color { r: 0.06, g: 0.12, b: 0.14, a: 1.0 })),
-                text_color: Color::from_rgb(0.85, 0.95, 0.98),
-                ..Default::default()
-            }
-        }
-        fn hovered(&self, style: &Self::Style) -> button::Appearance { self.active(style) }
-    }
-    let tabs = Row::new()
-        .spacing(10)
-        .push(Button::new(Text::new("Login")).on_press(Message::ToggleLoginRegister).style(TabButtonStyle))
-        .push(Button::new(Text::new("Register")).on_press(Message::ToggleLoginRegister).style(TabButtonStyle));
-
-    let card = Column::new()
-        .width(Length::Fixed(420.0))
-        .spacing(12)
-        .padding(16)
-        .align_items(Alignment::Center)
-        .push(Text::new("Ruggine").size(36).style(iced::theme::Text::Color(Color::from_rgb(0.95,0.98,1.0))))
-        .push(Row::new().push(Space::new(Length::Fill, Length::Fixed(0.0))).push(host_picklist).push(manual_host_input))
-        .push(tabs)
-        .push(username_input.width(Length::Fill))
-        .push(username_hint_text)
-        .push(password_input.width(Length::Fill))
-        .push(password_hint_text)
-        .push(
-            if submit_enabled {
-                submit_button.style(PrimaryButtonStyle)
-            } else {
-                submit_button
-            }
+                .style(InputStyle)
+                .width(Length::Fill)
+                .padding(12)
         )
-        .push(error_text)
-        .push(loading_text)
-        .push(log_area);
-    Container::new(card)
+        .padding([0, 0, 16, 0])
+        .into()
+    } else {
+        Space::new(Length::Fill, Length::Fixed(0.0)).into()
+    };
+
+    // Title
+    let title = Text::new("Ruggine")
+        .size(36)
+        .style(Color::from_rgb(1.0, 1.0, 1.0))
+        .horizontal_alignment(iced::alignment::Horizontal::Center);
+
+    // Tabs
+    let login_tab = Button::new(
+        Text::new("Login")
+            .horizontal_alignment(iced::alignment::Horizontal::Center)
+    )
+    .on_press(if !is_login { Message::ToggleLoginRegister } else { Message::None })
+    .style(TabButtonStyle { is_active: is_login })
+    .width(Length::Fill)
+    .padding([8, 16]);
+
+    let register_tab = Button::new(
+        Text::new("Register")
+            .horizontal_alignment(iced::alignment::Horizontal::Center)
+    )
+    .on_press(if is_login { Message::ToggleLoginRegister } else { Message::None })
+    .style(TabButtonStyle { is_active: !is_login })
+    .width(Length::Fill)
+    .padding([8, 16]);
+
+    let tabs = Row::new()
+        .spacing(0)
+        .push(login_tab)
+        .push(register_tab);
+
+    // Input fields
+    let email_input = TextInput::new("Email", username)
+        .on_input(Message::UsernameChanged)
+        .style(InputStyle)
+        .width(Length::Fill)
+        .padding(12);
+
+    let password_input = TextInput::new("Password", password)
+        .on_input(Message::PasswordChanged)
+        .password()
+        .style(InputStyle)
+        .width(Length::Fill)
+        .padding(12);
+
+    // Submit button
+    let submit_button = if submit_enabled {
+        Button::new(
+            Text::new(if is_login { "Login" } else { "Register" })
+                .horizontal_alignment(iced::alignment::Horizontal::Center)
+        )
+        .on_press(Message::SubmitLoginOrRegister)
+        .style(PrimaryButtonStyle)
+        .width(Length::Fill)
+        .padding(12)
+    } else {
+        Button::new(
+            Text::new(if is_login { "Login" } else { "Register" })
+                .horizontal_alignment(iced::alignment::Horizontal::Center)
+        )
+        .style(PrimaryButtonStyle)
+        .width(Length::Fill)
+        .padding(12)
+    };
+
+    // Error message
+    let error_element: Element<Message> = if let Some(msg) = error_message {
+        Text::new(msg)
+            .style(Color::from_rgb(1.0, 0.4, 0.4))
+            .horizontal_alignment(iced::alignment::Horizontal::Center)
+            .into()
+    } else {
+        Space::new(Length::Fill, Length::Fixed(0.0)).into()
+    };
+
+    // Loading indicator
+    let loading_element: Element<Message> = if loading {
+        Text::new("Loading...")
+            .style(Color::from_rgb(0.6, 0.8, 1.0))
+            .horizontal_alignment(iced::alignment::Horizontal::Center)
+            .into()
+    } else {
+        Space::new(Length::Fill, Length::Fixed(0.0)).into()
+    };
+
+    // Main card content
+    let card_content = Column::new()
+        .width(Length::Fixed(400.0))
+        .spacing(20)
+        .padding(32)
+        .align_items(Alignment::Center)
+        .push(title)
+        .push(Space::new(Length::Fill, Length::Fixed(20.0)))
+        .push(tabs)
+        .push(Space::new(Length::Fill, Length::Fixed(20.0)))
+        .push(email_input)
+        .push(password_input)
+        .push(Space::new(Length::Fill, Length::Fixed(10.0)))
+        .push(submit_button)
+        .push(error_element)
+        .push(loading_element);
+
+    let card = Container::new(card_content)
+        .style(CardStyle)
+        .center_x()
+        .center_y();
+
+    // Main layout with host selector at top
+    let main_content = Column::new()
         .width(Length::Fill)
         .height(Length::Fill)
-        .center_x()
-        .center_y()
-        .style(CardStyle)
+        .push(
+            Container::new(host_selector)
+                .width(Length::Fill)
+                .padding([16, 20, 0, 20])
+        )
+        .push(manual_host_input)
+        .push(
+            Container::new(card)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x()
+                .center_y()
+        );
+
+    Container::new(main_content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(DarkContainerStyle)
         .into()
 }
-
