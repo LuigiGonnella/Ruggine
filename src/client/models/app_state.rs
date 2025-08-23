@@ -179,6 +179,134 @@ impl ChatAppState {
                 self.loading = false;
                 self.app_state = AppState::Registration;
             }
+            Msg::OpenFriendRequests => {
+                self.app_state = AppState::FriendRequests;
+            }
+            Msg::OpenPrivateChat(username) => {
+                self.app_state = AppState::PrivateChat(username);
+            }
+            Msg::OpenGroupChat(group_id, group_name) => {
+                self.app_state = AppState::GroupChat(group_id, group_name);
+            }
+            // Quick test network actions
+            Msg::SendGroupMessageTest => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Invio messaggio di gruppo (test)...".to_string() });
+                // Perform async network call via shared ChatService
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let token_clone = token.clone();
+                    let svc = chat_service.clone();
+                    return iced::Command::perform(async move {
+                        let res = crate::client::services::group_service::GroupService::send_group_message(&svc, &host, &token_clone, "GruppoDemo", "Test message from UI").await;
+                        match res {
+                            Ok(r) => Msg::LogInfo(format!("Group send: {}", r)),
+                            Err(e) => Msg::LogError(format!("Group send failed: {}", e)),
+                        }
+                    }, |m| m);
+                } else {
+                    self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Error, message: "No session token available".to_string() });
+                }
+            }
+            Msg::GetGroupMessagesTest => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta messaggi gruppo (test)...".to_string() });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let token_clone = token.clone();
+                    let svc = chat_service.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::group_service::GroupService::get_group_messages(&svc, &host, &token_clone, "GruppoDemo").await {
+                            Ok(msgs) => Msg::LogInfo(format!("Got {} messages", msgs.len())),
+                            Err(e) => Msg::LogError(format!("Get group failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::DeleteGroupMessagesTest => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Cancellazione messaggi gruppo (test)...".to_string() });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let token_clone = token.clone();
+                    let svc = chat_service.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::group_service::GroupService::delete_group_messages(&svc, &host, &token_clone, "group-id-demo").await {
+                            Ok(r) => Msg::LogInfo(format!("Delete group: {}", r)),
+                            Err(e) => Msg::LogError(format!("Delete group failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::SendPrivateMessageTest => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Invio messaggio privato (test)...".to_string() });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let token_clone = token.clone();
+                    let svc = chat_service.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::friend_service::FriendService::send_private_message(&svc, &host, &token_clone, "alice", "Hello from UI test").await {
+                            Ok(r) => Msg::LogInfo(format!("Private send: {}", r)),
+                            Err(e) => Msg::LogError(format!("Private send failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::GetPrivateMessagesTest => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta messaggi privati (test)...".to_string() });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let token_clone = token.clone();
+                    let svc = chat_service.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::friend_service::FriendService::get_private_messages(&svc, &host, &token_clone, "alice").await {
+                            Ok(msgs) => Msg::LogInfo(format!("Got {} private messages", msgs.len())),
+                            Err(e) => Msg::LogError(format!("Get private failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::DeletePrivateMessagesTest => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Cancellazione messaggi privati (test)...".to_string() });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let token_clone = token.clone();
+                    let svc = chat_service.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::friend_service::FriendService::delete_private_messages(&svc, &host, &token_clone, "alice").await {
+                            Ok(r) => Msg::LogInfo(format!("Delete private: {}", r)),
+                            Err(e) => Msg::LogError(format!("Delete private failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
             _ => {}
         }
         iced::Command::none()

@@ -18,4 +18,15 @@ pub enum Message {
     LogSuccess(String),
     LogError(String),
     ToggleShowPassword,
+    // UI navigation and test actions for messaging features
+    OpenFriendRequests,
+    OpenPrivateChat(String),
+    OpenGroupChat(String, String),
+    // Test network actions triggered from main_actions (use defaults in the UI)
+    SendGroupMessageTest,
+    SendPrivateMessageTest,
+    GetGroupMessagesTest,
+    GetPrivateMessagesTest,
+    DeleteGroupMessagesTest,
+    DeletePrivateMessagesTest,
 }

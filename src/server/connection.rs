@@ -284,7 +284,7 @@ impl Server {
                 let message = &args[2..].join(" ");
                 messages::send_group_message(self.db.clone(), session_token, group_name, message, &self.config).await
             }
-            "/send_private" | "/private" if args.len() >= 3 => {
+            "/send_private"  if args.len() >= 3 => {
                 let session_token = args[0];
                 let to_username = args[1];
                 let message = &args[2..].join(" ");
