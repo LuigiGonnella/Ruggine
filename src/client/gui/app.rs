@@ -2,11 +2,13 @@ use iced::{Application, Command, Element, Theme};
 use crate::client::models::app_state::{AppState, ChatAppState};
 use crate::client::models::messages::Message;
 use crate::client::services::chat_service::ChatService;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use crate::client::utils::session_store;
 
 pub struct ChatApp {
     pub state: ChatAppState,
-    pub chat_service: ChatService,
+    pub chat_service: Arc<Mutex<ChatService>>,
 }
 
 impl Application for ChatApp {
@@ -17,11 +19,11 @@ impl Application for ChatApp {
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
         // Create default app and attempt to auto-validate saved session token.
+        let chat_service = Arc::new(Mutex::new(ChatService::new()));
         let app = ChatApp {
             state: ChatAppState::default(),
-            chat_service: ChatService::default(),
+            chat_service: chat_service.clone(),
         };
-
         // Perform async startup check: if a token is saved, try validate it against the default host.
         let cmd = Command::perform(
             async move {
@@ -31,30 +33,20 @@ impl Application for ChatApp {
                     // try to connect to default host from env
                     let cfg = crate::server::config::ClientConfig::from_env();
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                match tokio::net::TcpStream::connect(&host).await {
-            Ok(stream) => {
-                            use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-                            let (r, w) = stream.into_split();
-                            let mut reader = BufReader::new(r);
-                            let mut writer = BufWriter::new(w);
-                            let cmd = format!("/validate_session {}\n", token);
-                            writer.write_all(cmd.as_bytes()).await.ok();
-                            writer.flush().await.ok();
-                            let mut line = String::new();
-                            let n = reader.read_line(&mut line).await.ok();
-                            if n == Some(0) { return Message::None; }
-                            let response = line.trim().to_string();
-                            // Sanitize response: remove SESSION part before showing or passing to app state
-                            let cleaned = response.split("SESSION:").next().map(|s| s.trim().to_string()).unwrap_or_default();
-                            if response.starts_with("OK:") {
-                                return Message::AuthResult { success: true, message: cleaned, token: Some(token) };
-                            } else {
-                                // invalid session -> act like no session saved
-                                return Message::SessionMissing;
-                            }
+                // Use the app-level ChatService (persistent) to validate the saved session.
+                let svc = chat_service.clone();
+                let mut guard = svc.lock().await;
+                match guard.send_command(&host, format!("/validate_session {}", token)).await {
+                    Ok(response) => {
+                        let cleaned = response.split("SESSION:").next().map(|s| s.trim().to_string()).unwrap_or_default();
+                        if response.starts_with("OK:") {
+                            return Message::AuthResult { success: true, message: cleaned, token: Some(token) };
+                        } else {
+                            return Message::SessionMissing;
                         }
-                    Err(_) => Message::SessionMissing,
                     }
+                    Err(_) => Message::SessionMissing,
+                }
         } else { Message::SessionMissing }
             },
             |m| m,
@@ -89,31 +81,18 @@ impl Application for ChatApp {
                     message: format!("Connessione a {}...", host),
                 });
                 // Esegui la connessione e invia il comando
+                let svc_outer = self.chat_service.clone();
                 return Command::perform(
                     async move {
-                        use tokio::net::TcpStream;
-                        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-                        let stream = TcpStream::connect(&host).await;
-                        match stream {
-                            Ok(stream) => {
-                                let (reader, writer) = stream.into_split();
-                                let mut server_reader = BufReader::new(reader);
-                                let mut server_writer = BufWriter::new(writer);
-                                let cmd = if is_login {
-                                    format!("/login {} {}", username, password)
-                                } else {
-                                    format!("/register {} {}", username, password)
-                                };
-                                server_writer.write_all(cmd.as_bytes()).await.ok();
-                                server_writer.write_all(b"\n").await.ok();
-                                server_writer.flush().await.ok();
-                                let mut server_line = String::new();
-                                let n = server_reader.read_line(&mut server_line).await.ok();
-                                if n == Some(0) {
-                                    return Msg::AuthResult { success: false, message: "Server disconnesso".to_string(), token: None };
-                                }
-                                let response = server_line.trim().to_string();
-                                // extract token if present
+                        // Use the persistent ChatService stored in the app
+                        let mut guard = svc_outer.lock().await;
+                        let cmd = if is_login {
+                            format!("/login {} {}", username, password)
+                        } else {
+                            format!("/register {} {}", username, password)
+                        };
+                        match guard.send_command(&host, cmd).await {
+                            Ok(response) => {
                                 let token = response.lines().find_map(|l| {
                                     if l.contains("SESSION:") {
                                         Some(l.split("SESSION:").nth(1).map(|s| s.trim().to_string()).unwrap_or_default())
@@ -134,7 +113,7 @@ impl Application for ChatApp {
             }
             _ => {}
         }
-        self.state.update(message, &mut self.chat_service)
+    self.state.update(message, &self.chat_service)
     }
 
     fn view(&self) -> Element<Message> {

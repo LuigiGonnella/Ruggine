@@ -59,7 +59,8 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting ruggine_modulare server on {}:{}", args.host, args.port);
     let db = Arc::new(Database::connect(&config.database_url).await?);
     db.migrate().await?;
-    let server = Server { db: db.clone(), config: config.clone() };
+    let presence = ruggine_modulare::server::presence::PresenceRegistry::new();
+    let server = Server { db: db.clone(), config: config.clone(), presence };
 
     // Spawn periodic cleanup of expired sessions (runs every hour)
     let cleaner_db = db.clone();
@@ -68,6 +69,15 @@ async fn main() -> anyhow::Result<()> {
             ruggine_modulare::server::auth::cleanup_expired_sessions(cleaner_db.clone()).await;
             tokio::time::sleep(std::time::Duration::from_secs(60 * 60)).await;
         }
+    });
+
+    // Start performance logger: writes CPU and DB stats periodically to a file
+    // Path configurable via PERFORMANCE_LOG_PATH env var
+    let perf_log_path = std::env::var("PERFORMANCE_LOG_PATH").unwrap_or_else(|_| "data/ruggine_performance.log".to_string());
+    let perf_db = db.clone();
+    tokio::spawn(async move {
+        // call the utility that runs an intervaled logger
+        ruggine_modulare::utils::performance::start_performance_logger(perf_db.clone(), &perf_log_path).await;
     });
 
     // TLS hint for the operator

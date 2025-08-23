@@ -19,6 +19,7 @@ impl Default for AppState {
 
 use crate::client::gui::views::registration::HostType;
 use crate::client::gui::views::logger::LogMessage;
+use crate::server::config::ClientConfig;
 
 #[derive(Debug, Clone, Default)]
 pub struct ChatAppState {
@@ -37,7 +38,7 @@ pub struct ChatAppState {
 }
 
 impl ChatAppState {
-    pub fn update(&mut self, message: crate::client::models::messages::Message, chat_service: &mut crate::client::services::chat_service::ChatService) -> iced::Command<crate::client::models::messages::Message> {
+    pub fn update(&mut self, message: crate::client::models::messages::Message, chat_service: &std::sync::Arc<tokio::sync::Mutex<crate::client::services::chat_service::ChatService>>) -> iced::Command<crate::client::models::messages::Message> {
     use crate::client::models::messages::Message as Msg;
     use crate::client::utils::session_store;
     match message {
@@ -117,7 +118,15 @@ impl ChatAppState {
                 }
             }
             Msg::Logout => {
-                // Clear persisted session and reset state
+                // Attempt to send a /logout command to the server (if we have a token).
+                // Capture token before clearing local state.
+                let token_to_send = if let Some(t) = self.session_token.clone() {
+                    Some(t)
+                } else {
+                    session_store::load_session_token()
+                };
+
+                // Immediately clear persisted/local session and switch UI to registration.
                 let _ = session_store::clear_session_token();
                 self.session_token = None;
                 self.app_state = AppState::Registration;
@@ -127,6 +136,27 @@ impl ChatAppState {
                     level: crate::client::gui::views::logger::LogLevel::Info,
                     message: "Logout effettuato con successo.".to_string(),
                 });
+
+                // If we have a token, asynchronously send /logout <token> using the shared ChatService.
+                if let Some(token) = token_to_send {
+                    // Resolve host selection similar to other flows
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    return iced::Command::perform(async move {
+                        let mut guard = svc.lock().await;
+                        match guard.send_command(&host, format!("/logout {}", token)).await {
+                            Ok(resp) => Msg::LogInfo(format!("Logout response: {}", resp)),
+                            Err(e) => Msg::LogError(format!("Logout failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+
+                // Fallback: keep the small clear-log timer
                 return iced::Command::perform(async { tokio::time::sleep(std::time::Duration::from_secs(3)).await; () }, |_| Msg::ClearLog);
             }
             Msg::LogInfo(msg) => self.logger.push(crate::client::gui::views::logger::LogMessage {

@@ -135,6 +135,16 @@ impl Database {
             );
         "#).execute(&self.pool).await?;
 
+        // Session events (login_success, logout, quit, kicked_out)
+        sqlx::query(r#"
+            CREATE TABLE IF NOT EXISTS session_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+        "#).execute(&self.pool).await?;
+
         Ok(())
     }
 }

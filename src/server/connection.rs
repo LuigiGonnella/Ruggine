@@ -1,4 +1,4 @@
-use crate::server::{database::Database, auth, users, groups, messages};
+use crate::server::{database::Database, auth, users, groups, messages, presence::PresenceRegistry};
 use sqlx::Row;
 use crate::server::config::ServerConfig;
 use std::sync::Arc;
@@ -15,6 +15,7 @@ use rustls_pemfile::{certs, rsa_private_keys, pkcs8_private_keys};
 pub struct Server {
     pub db: Arc<Database>,
     pub config: ServerConfig,
+    pub presence: PresenceRegistry,
 }
 
 impl Server {
@@ -62,20 +63,21 @@ impl Server {
             let db = self.db.clone();
             let config = self.config.clone();
             let acceptor = tls_acceptor.clone();
+            let presence = self.presence.clone();
             tokio::spawn(async move {
                 // If TLS is configured, try to accept TLS, otherwise use plain TCP
                 if let Some(acceptor) = acceptor {
                     match acceptor.accept(stream).await {
                         Ok(tls_stream) => {
-                            if let Err(e) = handle_tls_client(db, config, tls_stream).await {
-                                println!("[SERVER] Client error (tls): {}", e);
-                            }
+                                    if let Err(e) = handle_tls_client(db, config, tls_stream, peer, presence.clone()).await {
+                                        println!("[SERVER] Client error (tls {}) : {}", peer, e);
+                                    }
                         }
                         Err(e) => println!("[SERVER] TLS accept failed: {}", e),
                     }
                 } else {
-                    if let Err(e) = handle_client(db, config, stream).await {
-                        println!("[SERVER] Client error: {}", e);
+                    if let Err(e) = handle_client(db, config, stream, peer, presence.clone()).await {
+                        println!("[SERVER] Client error ({}): {}", peer, e);
                     }
                 }
             });
@@ -147,7 +149,38 @@ impl Server {
             }
             "/logout" if args.len() == 1 => {
                 // args[0] = session_token
-                auth::logout(self.db.clone(), args[0]).await
+                let token = args[0];
+                // attempt to resolve user_id first so we can kick presence after logout
+                if let Some(uid) = auth::validate_session(self.db.clone(), token).await {
+                    println!("[AUTH] Handling /logout for user {} (token masked)", uid);
+                    let res = auth::logout(self.db.clone(), token).await;
+                    // After logout, query DB to report current sessions count and is_online state for debugging
+                    let sess_cnt = sqlx::query("SELECT COUNT(1) as c FROM sessions WHERE user_id = ?")
+                        .bind(&uid)
+                        .fetch_one(&self.db.pool)
+                        .await
+                        .ok()
+                        .and_then(|r| r.try_get::<i64, _>("c").ok())
+                        .unwrap_or(-1);
+                    let is_online = sqlx::query("SELECT is_online FROM users WHERE id = ?")
+                        .bind(&uid)
+                        .fetch_optional(&self.db.pool)
+                        .await
+                        .ok()
+                        .and_then(|opt| opt.map(|r| r.get::<i64, _>("is_online")))
+                        .unwrap_or(-1);
+                    println!("[AUTH][DB CHECK] after logout: sessions_count={} users.is_online={} for user {}", sess_cnt, is_online, uid);
+                    let kicked = self.presence.kick_all(&uid).await;
+                    println!("[AUTH] Logout triggered kick for user {} (kicked={})", uid, kicked);
+                    res
+                } else {
+                    // session not valid/expired, still call logout for consistent response
+                    println!("[AUTH] /logout called with invalid/expired token (raw token masked)");
+                    let res = auth::logout(self.db.clone(), token).await;
+                    // Can't resolve uid to run presence.kick_all; return result but also attempt to log token outcome
+                    println!("[AUTH] /logout completed for unknown token, result={}", res);
+                    res
+                }
             }
             "/validate_session" if args.len() == 1 => {
                 let session_token = args[0];
@@ -245,7 +278,7 @@ impl Server {
                 }
             }
             // MESSAGGI
-            "/send" if args.len() >= 3 => {
+            "/send_group" if args.len() >= 3 => {
                 let session_token = args[0];
                 let group_name = args[1];
                 let message = &args[2..].join(" ");
@@ -282,34 +315,150 @@ impl Server {
     }
 }
 
-async fn handle_client(db: Arc<Database>, config: ServerConfig, stream: TcpStream) -> anyhow::Result<()> {
+async fn handle_client(db: Arc<Database>, config: ServerConfig, stream: TcpStream, peer: std::net::SocketAddr, presence: PresenceRegistry) -> anyhow::Result<()> {
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let mut writer = BufWriter::new(writer);
     let mut line = String::new();
+    let mut kick_rx: Option<tokio::sync::oneshot::Receiver<()>> = None;
+    let mut registered_user: Option<String> = None;
+    let mut registered_token: Option<String> = None;
     loop {
         line.clear();
-        let n = reader.read_line(&mut line).await?;
-        if n == 0 {
-            println!("[SERVER] Client disconnected");
-            break;
+        if let Some(rx) = &mut kick_rx {
+            tokio::select! {
+                biased;
+                _ = rx => {
+                    if let Some(uid) = &registered_user {
+                        println!("[AUTH] User {} kicked out due to login from another device", uid);
+                    } else {
+                        println!("[SERVER] Client was kicked out");
+                    }
+                    break;
+                }
+                res = reader.read_line(&mut line) => {
+                    let n = res?;
+                    if n == 0 {
+                        println!("[SERVER] Client disconnected: {}", peer);
+                        break;
+                    }
+                }
+            }
+        } else {
+            let n = reader.read_line(&mut line).await?;
+            if n == 0 {
+                println!("[SERVER] Client disconnected: {}", peer);
+                break;
+            }
         }
-        let trimmed = line.trim();
+    let trimmed = line.trim();
+    // Raw incoming line logger for diagnostics
+    println!("[CONN:RAW] [{}] Raw line received: '{}'", peer, trimmed);
         if trimmed.is_empty() { continue; }
         let mut parts = trimmed.split_whitespace();
         let cmd = parts.next().unwrap_or("");
         let args: Vec<&str> = parts.collect();
-        let server = Server { db: db.clone(), config: config.clone() };
+        println!("[CONN] [{}] Cmd='{}' Args={:?}", peer, cmd, args);
+        let server = Server { db: db.clone(), config: config.clone(), presence: presence.clone() };
         let response = server.handle_command(cmd, &args).await;
+        println!("[CONN] [{}] Response: {}", peer, response);
+        // If the client just validated an existing session, register presence so
+        // we treat this connection as an active one (preserve session row for auto-login
+        // but reflect presence in is_online).
+        if cmd == "/validate_session" && args.len() == 1 && response.starts_with("OK:") {
+            let token = args[0];
+            println!("[CONN] [{}] /validate_session returned OK for token {} — registering presence", peer, token);
+            if let Some(uid) = auth::validate_session(db.clone(), token).await {
+                // Do not kick existing sessions on validate; just register this connection
+                let rx = presence.register(&uid).await;
+                println!("[CONN] [{}] Registered presence receiver for user {} (via validate_session)", peer, uid);
+                // set is_online = 1 when a connection registers
+                let _ = sqlx::query("UPDATE users SET is_online = 1 WHERE id = ?")
+                    .bind(&uid)
+                    .execute(&db.pool)
+                    .await;
+                println!("[DB] Set is_online=1 for user {} due to validate_session", uid);
+                kick_rx = Some(rx);
+                registered_user = Some(uid.clone());
+                registered_token = Some(token.to_string());
+            } else {
+                println!("[CONN] [{}] validate_session token {} became invalid during registration", peer, token);
+            }
+        }
+        if response.contains("SESSION:") {
+            if let Some(line) = response.lines().find(|l| l.contains("SESSION:")) {
+                if let Some(tok) = line.split("SESSION:").nth(1) {
+                    let token = tok.trim();
+                    println!("[CONN] [{}] Detected SESSION token: {}", peer, token);
+                    if let Some(uid) = auth::validate_session(db.clone(), token).await {
+                        println!("[CONN] [{}] Token maps to user_id={}", peer, uid);
+                        // kick previous sessions for this user and record event
+                        let kicked = presence.kick_all(&uid).await;
+                        if kicked > 0 {
+                            println!("[AUTH] User {} kicked out due to login from another device (kicked={})", uid, kicked);
+                            let now = chrono::Utc::now().timestamp();
+                            let res = sqlx::query("INSERT INTO session_events (user_id, event_type, created_at) VALUES (?, ?, ?)")
+                                .bind(&uid)
+                                .bind("kicked_out")
+                                .bind(now)
+                                .execute(&db.pool)
+                                .await;
+                            println!("[DB] Inserted kicked_out event for {} result={:?}", uid, res);
+                        } else {
+                            println!("[AUTH] No previous sessions to kick for {}", uid);
+                        }
+                        let rx = presence.register(&uid).await;
+                        println!("[CONN] [{}] Registered presence receiver for user {}", peer, uid);
+                        // set is_online = 1 when a connection registers
+                        let _ = sqlx::query("UPDATE users SET is_online = 1 WHERE id = ?")
+                            .bind(&uid)
+                            .execute(&db.pool)
+                            .await;
+                        println!("[DB] Set is_online=1 for user {} due to active connection", uid);
+                        kick_rx = Some(rx);
+                        registered_user = Some(uid.clone());
+                        registered_token = Some(token.to_string());
+                    }
+                }
+            }
+        }
         writer.write_all(response.as_bytes()).await?;
         writer.write_all(b"\n").await?;
         writer.flush().await?;
+    }
+    if let Some(uid) = registered_user {
+        println!("[CONN] [{}] Connection for user {} ending; cleaning up", peer, uid);
+        presence.unregister_one(&uid).await;
+        // If no more active connections, set is_online = 0 (preserve session row for auto-login)
+        let remaining = presence.count(&uid).await;
+        if remaining == 0 {
+            let _ = sqlx::query("UPDATE users SET is_online = 0 WHERE id = ?")
+                .bind(&uid)
+                .execute(&db.pool)
+                .await;
+            println!("[DB] Set is_online=0 for user {} because no active connections remain", uid);
+        } else {
+            println!("[CONN] [{}] {} active connections remain for user {}, leaving is_online=1", peer, remaining, uid);
+        }
+        if let Some(tok) = registered_token {
+            println!("[CONN] [{}] Preserving session token {} for user {} to allow auto-login on reconnect", peer, tok, uid);
+        } else {
+            println!("[CONN] [{}] No session token associated with this connection", peer);
+        }
+        let now = chrono::Utc::now().timestamp();
+        let res = sqlx::query("INSERT INTO session_events (user_id, event_type, created_at) VALUES (?, ?, ?)")
+            .bind(&uid)
+            .bind("quit")
+            .bind(now)
+            .execute(&db.pool)
+            .await;
+        println!("[DB] Inserted quit event for {} result={:?}", uid, res);
     }
     Ok(())
 }
 
 // TLS stream handling: keep the same protocol logic but using the TLS stream types
-async fn handle_tls_client<S>(db: Arc<Database>, config: ServerConfig, stream: S) -> anyhow::Result<()>
+async fn handle_tls_client<S>(db: Arc<Database>, config: ServerConfig, stream: S, peer: std::net::SocketAddr, presence: PresenceRegistry) -> anyhow::Result<()>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
@@ -317,23 +466,122 @@ where
     let mut reader = BufReader::new(reader);
     let mut writer = BufWriter::new(writer);
     let mut line = String::new();
+    let mut kick_rx: Option<tokio::sync::oneshot::Receiver<()>> = None;
+    let mut registered_user: Option<String> = None;
+    let mut registered_token: Option<String> = None;
     loop {
         line.clear();
-        let n = reader.read_line(&mut line).await?;
-        if n == 0 {
-            println!("[SERVER] Client disconnected");
-            break;
+        if let Some(rx) = &mut kick_rx {
+            tokio::select! {
+                biased;
+                _ = rx => {
+                    if let Some(uid) = &registered_user {
+                        println!("[AUTH] User {} kicked out due to login from another device", uid);
+                    } else {
+                        println!("[SERVER] Client was kicked out");
+                    }
+                    break;
+                }
+                res = reader.read_line(&mut line) => {
+                    let n = res?;
+                    if n == 0 {
+                        println!("[SERVER] Client disconnected: {}", peer);
+                        break;
+                    }
+                }
+            }
+        } else {
+            let n = reader.read_line(&mut line).await?;
+            if n == 0 {
+                println!("[SERVER] Client disconnected: {}", peer);
+                break;
+            }
         }
-        let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
+    let trimmed = line.trim();
+    // Raw incoming line logger for diagnostics (TLS)
+    println!("[CONN:RAW] [{}] TLS Raw line received: '{}'", peer, trimmed);
+    if trimmed.is_empty() { continue; }
         let mut parts = trimmed.split_whitespace();
         let cmd = parts.next().unwrap_or("");
         let args: Vec<&str> = parts.collect();
-        let server = Server { db: db.clone(), config: config.clone() };
+        let server = Server { db: db.clone(), config: config.clone(), presence: presence.clone() };
         let response = server.handle_command(cmd, &args).await;
+        // If the client just validated an existing session, register presence so
+        // we treat this TLS connection as an active one (preserve session row for auto-login
+        // but reflect presence in is_online).
+        if cmd == "/validate_session" && args.len() == 1 && response.starts_with("OK:") {
+            let token = args[0];
+            println!("[CONN] [{}] TLS /validate_session returned OK for token {} — registering presence", peer, token);
+            if let Some(uid) = auth::validate_session(db.clone(), token).await {
+                let rx = presence.register(&uid).await;
+                println!("[CONN] [{}] TLS Registered presence receiver for user {} (via validate_session)", peer, uid);
+                let _ = sqlx::query("UPDATE users SET is_online = 1 WHERE id = ?")
+                    .bind(&uid)
+                    .execute(&db.pool)
+                    .await;
+                println!("[DB] TLS Set is_online=1 for user {} due to validate_session", uid);
+                kick_rx = Some(rx);
+                registered_user = Some(uid.clone());
+                registered_token = Some(token.to_string());
+            } else {
+                println!("[CONN] [{}] TLS validate_session token {} became invalid during registration", peer, token);
+            }
+        }
+        if response.contains("SESSION:") {
+            if let Some(line) = response.lines().find(|l| l.contains("SESSION:")) {
+                if let Some(tok) = line.split("SESSION:").nth(1) {
+                    let token = tok.trim();
+                    if let Some(uid) = auth::validate_session(db.clone(), token).await {
+                        let kicked = presence.kick_all(&uid).await;
+                        if kicked > 0 {
+                            println!("[AUTH] User {} kicked out due to login from another device", uid);
+                            let now = chrono::Utc::now().timestamp();
+                            let _ = sqlx::query("INSERT INTO session_events (user_id, event_type, created_at) VALUES (?, ?, ?)")
+                                .bind(&uid)
+                                .bind("kicked_out")
+                                .bind(now)
+                                .execute(&db.pool)
+                                .await;
+                        }
+                        let rx = presence.register(&uid).await;
+                        kick_rx = Some(rx);
+                        registered_user = Some(uid.clone());
+                        registered_token = Some(token.to_string());
+                    }
+                }
+            }
+        }
         writer.write_all(response.as_bytes()).await?;
         writer.write_all(b"\n").await?;
         writer.flush().await?;
+    }
+    if let Some(uid) = registered_user {
+        println!("[CONN] [{}] TLS connection for user {} ending; cleaning up", peer, uid);
+        presence.unregister_one(&uid).await;
+        // If no more active connections, set is_online = 0 (preserve session row for auto-login)
+        let remaining = presence.count(&uid).await;
+        if remaining == 0 {
+            let _ = sqlx::query("UPDATE users SET is_online = 0 WHERE id = ?")
+                .bind(&uid)
+                .execute(&db.pool)
+                .await;
+            println!("[DB] TLS Set is_online=0 for user {} because no active connections remain", uid);
+        } else {
+            println!("[CONN] [{}] TLS {} active connections remain for user {}, leaving is_online=1", peer, remaining, uid);
+        }
+        if let Some(tok) = registered_token {
+            println!("[CONN] [{}] TLS preserving session token {} for user {} to allow auto-login on reconnect", peer, tok, uid);
+        } else {
+            println!("[CONN] [{}] TLS No session token associated with this connection", peer);
+        }
+        let now = chrono::Utc::now().timestamp();
+        let res = sqlx::query("INSERT INTO session_events (user_id, event_type, created_at) VALUES (?, ?, ?)")
+            .bind(&uid)
+            .bind("quit")
+            .bind(now)
+            .execute(&db.pool)
+            .await;
+        println!("[DB] TLS Inserted quit event for {} result={:?}", uid, res);
     }
     Ok(())
 }

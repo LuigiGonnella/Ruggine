@@ -9,6 +9,7 @@ use rand::{Rng, RngCore};
 /// Logout: elimina la sessione e imposta utente offline
 pub async fn logout(db: Arc<Database>, session_token: &str) -> String {
     // Trova user_id dalla sessione
+    println!("[AUTH] logout called (token masked)");
     let row = sqlx::query("SELECT user_id FROM sessions WHERE session_token = ?")
         .bind(session_token)
         .fetch_optional(&db.pool)
@@ -16,25 +17,56 @@ pub async fn logout(db: Arc<Database>, session_token: &str) -> String {
     match row {
         Ok(Some(row)) => {
             let user_id: String = row.get("user_id");
-            // Elimina la sessione
-            let _ = sqlx::query("DELETE FROM sessions WHERE session_token = ?")
-                .bind(session_token)
+            // Invalidate all sessions for this user (logout from all devices) to enforce single-session semantics
+            match sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+                .bind(&user_id)
                 .execute(&db.pool)
-                .await;
-            // Imposta utente offline solo se non ci sono altre sessioni attive
-            let other = sqlx::query("SELECT COUNT(1) as cnt FROM sessions WHERE user_id = ?")
+                .await
+            {
+                Ok(r) => println!("[AUTH] Deleted {} session rows for user {}", r.rows_affected(), user_id),
+                Err(e) => println!("[AUTH] Failed deleting sessions for {}: {}", user_id, e),
+            }
+
+            // Force user offline
+            match sqlx::query("UPDATE users SET is_online = 0 WHERE id = ?")
+                .bind(&user_id)
+                .execute(&db.pool)
+                .await
+            {
+                Ok(_) => println!("[AUTH] Set is_online=0 for user {} due to logout", user_id),
+                Err(e) => println!("[AUTH] Failed to set is_online=0 for {}: {}", user_id, e),
+            }
+
+            // Verify state after logout
+            let sess_cnt = sqlx::query("SELECT COUNT(1) as c FROM sessions WHERE user_id = ?")
                 .bind(&user_id)
                 .fetch_one(&db.pool)
-                .await;
-            if let Ok(r) = other {
-                let cnt: i64 = r.get("cnt");
-                if cnt == 0 {
-                    let _ = sqlx::query("UPDATE users SET is_online = 0 WHERE id = ?")
-                        .bind(&user_id)
-                        .execute(&db.pool)
-                        .await;
-                }
+                .await
+                .ok()
+                .and_then(|r| r.try_get::<i64, _>("c").ok())
+                .unwrap_or(-1);
+            let is_online = sqlx::query("SELECT is_online FROM users WHERE id = ?")
+                .bind(&user_id)
+                .fetch_optional(&db.pool)
+                .await
+                .ok()
+                .and_then(|opt| opt.map(|r| r.get::<i64, _>("is_online")))
+                .unwrap_or(-1);
+            println!("[AUTH][DB CHECK] logout completed: sessions_count={} users.is_online={} for user {}", sess_cnt, is_online, user_id);
+
+            // record logout event
+            let now = chrono::Utc::now().timestamp();
+            match sqlx::query("INSERT INTO session_events (user_id, event_type, created_at) VALUES (?, ?, ?)")
+                .bind(&user_id)
+                .bind("logout")
+                .bind(now)
+                .execute(&db.pool)
+                .await
+            {
+                Ok(_) => println!("[AUTH] Recorded logout event for {}", user_id),
+                Err(e) => println!("[AUTH] Failed to record logout event for {}: {}", user_id, e),
             }
+
             println!("[AUTH] Logout success for user_id={}", user_id);
             "OK: Logout effettuato".to_string()
         }
@@ -103,11 +135,11 @@ pub async fn register(db: Arc<Database>, username: &str, password: &str, config:
                 .await
                 .ok();
             // Imposta utente online e crea sessione subito dopo la registrazione
-            sqlx::query("UPDATE users SET is_online = 1 WHERE id = ?")
+            let _ = sqlx::query("UPDATE users SET is_online = 1 WHERE id = ?")
                 .bind(&user_id)
                 .execute(&mut *tx)
-                .await
-                .ok();
+                .await;
+            println!("[AUTH] Set is_online=1 for new user {}", user_id);
             // Crea sessione come nel login
             let session_token = generate_session_token();
             let now = chrono::Utc::now().timestamp();
@@ -120,6 +152,7 @@ pub async fn register(db: Arc<Database>, username: &str, password: &str, config:
                 .execute(&mut *tx)
                 .await
                 .ok();
+            println!("[AUTH] Created initial session for user {} token={}", user_id, session_token);
             tx.commit().await.ok();
             println!("[AUTH] Registered user {} (id={})", username, user_id);
             format!("OK: Registered as {} SESSION: {}", username, session_token)
@@ -142,25 +175,67 @@ pub async fn login(db: Arc<Database>, username: &str, password: &str, config: &S
             let user_id: String = row.get("id");
             let password_hash: String = row.get("password_hash");
             if verify_password(&password_hash, password) {
-                sqlx::query("UPDATE users SET is_online = 1 WHERE id = ?")
-                    .bind(&user_id)
-                    .execute(&db.pool)
-                    .await
-                    .ok();
-                // Sessione
-                let session_token = generate_session_token();
-                let now = chrono::Utc::now().timestamp();
-                let expires = now + 60*60*24*config.session_expiry_days as i64;
-                sqlx::query("INSERT INTO sessions (user_id, session_token, created_at, expires_at) VALUES (?, ?, ?, ?)")
-                    .bind(&user_id)
-                    .bind(&session_token)
-                    .bind(now)
-                    .bind(expires)
-                    .execute(&db.pool)
-                    .await
-                    .ok();
-                println!("[AUTH] Login success for {} (id={})", username, user_id);
-                format!("OK: Logged in as {} SESSION: {}", username, session_token)
+                // Begin transaction to ensure atomic single-session semantics
+                match db.pool.begin().await {
+                    Ok(mut tx) => {
+                        // Remove any existing sessions for this user
+                        match sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+                            .bind(&user_id)
+                            .execute(&mut *tx)
+                            .await
+                        {
+                            Ok(r) => println!("[AUTH] Deleted {} old sessions for user {} during login", r.rows_affected(), user_id),
+                            Err(e) => println!("[AUTH] Failed deleting old sessions for {}: {}", user_id, e),
+                        }
+
+                        // Set user online
+                        match sqlx::query("UPDATE users SET is_online = 1 WHERE id = ?")
+                            .bind(&user_id)
+                            .execute(&mut *tx)
+                            .await
+                        {
+                            Ok(_) => println!("[AUTH] Set is_online=1 for user {} (transaction)", user_id),
+                            Err(e) => println!("[AUTH] Failed to set is_online for {}: {}", user_id, e),
+                        }
+
+                        // Create new session token
+                        let session_token = generate_session_token();
+                        let now = chrono::Utc::now().timestamp();
+                        let expires = now + 60*60*24*config.session_expiry_days as i64;
+                        match sqlx::query("INSERT INTO sessions (user_id, session_token, created_at, expires_at) VALUES (?, ?, ?, ?)")
+                            .bind(&user_id)
+                            .bind(&session_token)
+                            .bind(now)
+                            .bind(expires)
+                            .execute(&mut *tx)
+                            .await
+                        {
+                            Ok(_) => println!("[AUTH] Inserted new session for user {} token={}", user_id, session_token),
+                            Err(e) => println!("[AUTH] Failed inserting session for {}: {}", user_id, e),
+                        }
+
+                        // Record login event
+                        let _ = sqlx::query("INSERT INTO session_events (user_id, event_type, created_at) VALUES (?, ?, ?)")
+                            .bind(&user_id)
+                            .bind("login_success")
+                            .bind(now)
+                            .execute(&mut *tx)
+                            .await;
+
+                        // Commit
+                        if let Err(e) = tx.commit().await {
+                            println!("[AUTH] Failed to commit login transaction for {}: {}", user_id, e);
+                            return format!("ERR: Login failed: {}", e);
+                        }
+
+                        println!("[AUTH] Login success for {} (id={})", username, user_id);
+                        return format!("OK: Logged in as {} SESSION: {}", username, session_token)
+                    }
+                    Err(e) => {
+                        println!("[AUTH] Failed to start transaction for login {}: {}", username, e);
+                        return format!("ERR: Login failed: {}", e);
+                    }
+                }
             } else {
                 println!("[AUTH] Login failed for {}: wrong password", username);
                 "ERR: Wrong password".to_string()
@@ -185,6 +260,11 @@ pub async fn validate_session(db: Arc<Database>, session_token: &str) -> Option<
         .fetch_optional(&db.pool)
         .await
         .ok()?;
+    if row.is_some() {
+        println!("[AUTH] validate_session: token {} is valid", session_token);
+    } else {
+        println!("[AUTH] validate_session: token {} is invalid or expired", session_token);
+    }
     row.map(|r| r.get::<String,_>("user_id"))
 }
 

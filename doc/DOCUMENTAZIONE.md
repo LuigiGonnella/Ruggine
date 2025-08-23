@@ -1,5 +1,12 @@
 # Documentazione Progetto: ruggine_modulare
 
+> Aggiornamento: la documentazione tecnica relativa a sessioni, presenza, eventi di audit e TLS
+> è stata unificata in `doc/SESSION_AND_TLS.md`. Per i dettagli sul flusso di login, logout,
+> auto-login, kicked_out/quit events e la configurazione TLS consultare quel file.
+>
+> Questo file contiene ancora una panoramica generale del progetto; per dettagli operativi
+> e debugging legati alle sessioni usare il documento specifico.
+
 ## 1. Idea del Progetto
 "ruggine_modulare" è una piattaforma di chat client-server scritta in Rust, progettata per essere modulare, estendibile e facilmente manutenibile. L'obiettivo è fornire una base robusta per applicazioni di messaggistica, con supporto per autenticazione, gestione utenti, gruppi, messaggi, e interfacce sia CLI che GUI.
 
