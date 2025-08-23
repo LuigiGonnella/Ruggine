@@ -1,6 +1,5 @@
-use iced::{Element, Length, Alignment, Color, Background, Border};
+use iced::{Element, Length, Alignment, Color, Background, Border, Theme};
 use iced::widget::{Column, Row, Text, TextInput, Button, PickList, Container, Space};
-use iced::widget::{button, container, text_input};
 use crate::client::models::messages::Message;
 use crate::client::models::app_state::ChatAppState;
 
@@ -43,165 +42,6 @@ impl Default for HostType {
     }
 }
 
-// Custom styles
-struct DarkContainerStyle;
-impl container::StyleSheet for DarkContainerStyle {
-    type Style = iced::Theme;
-    fn appearance(&self, _style: &Self::Style) -> container::Appearance {
-        container::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.11, 0.15, 0.18))),
-            border: Border::default(),
-            ..Default::default()
-        }
-    }
-}
-
-struct CardStyle;
-impl container::StyleSheet for CardStyle {
-    type Style = iced::Theme;
-    fn appearance(&self, _style: &Self::Style) -> container::Appearance {
-        container::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.15, 0.20, 0.24))),
-            border: Border {
-                radius: 12.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
-}
-
-struct InputStyle;
-impl text_input::StyleSheet for InputStyle {
-    type Style = iced::Theme;
-    
-    fn active(&self, _style: &Self::Style) -> text_input::Appearance {
-        text_input::Appearance {
-            background: Background::Color(Color::from_rgb(0.20, 0.26, 0.30)),
-            border: Border {
-                radius: 8.0.into(),
-                width: 1.0,
-                color: Color::from_rgb(0.25, 0.31, 0.35),
-            },
-            icon_color: Color::from_rgb(0.6, 0.7, 0.8),
-        }
-    }
-    
-    fn focused(&self, style: &Self::Style) -> text_input::Appearance {
-        let mut appearance = self.active(style);
-        appearance.border.color = Color::from_rgb(0.0, 0.68, 0.9);
-        appearance
-    }
-    
-    fn placeholder_color(&self, _style: &Self::Style) -> Color {
-        Color::from_rgb(0.5, 0.6, 0.7)
-    }
-    
-    fn value_color(&self, _style: &Self::Style) -> Color {
-        Color::from_rgb(0.9, 0.95, 1.0)
-    }
-    
-    fn disabled_color(&self, _style: &Self::Style) -> Color {
-        Color::from_rgb(0.4, 0.5, 0.6)
-    }
-    
-    fn selection_color(&self, _style: &Self::Style) -> Color {
-        Color::from_rgb(0.0, 0.68, 0.9)
-    }
-    
-    fn disabled(&self, style: &Self::Style) -> text_input::Appearance {
-        self.active(style)
-    }
-    
-    fn hovered(&self, style: &Self::Style) -> text_input::Appearance {
-        self.active(style)
-    }
-}
-
-struct PrimaryButtonStyle;
-impl button::StyleSheet for PrimaryButtonStyle {
-    type Style = iced::Theme;
-    
-    fn active(&self, _style: &Self::Style) -> button::Appearance {
-        button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.0, 0.68, 0.9))),
-            text_color: Color::from_rgb(1.0, 1.0, 1.0),
-            border: Border {
-                radius: 8.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
-    
-    fn hovered(&self, _style: &Self::Style) -> button::Appearance {
-        button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.0, 0.75, 0.95))),
-            text_color: Color::from_rgb(1.0, 1.0, 1.0),
-            border: Border {
-                radius: 8.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
-    
-    fn pressed(&self, style: &Self::Style) -> button::Appearance {
-        self.hovered(style)
-    }
-    
-    fn disabled(&self, _style: &Self::Style) -> button::Appearance {
-        button::Appearance {
-            background: Some(Background::Color(Color::from_rgb(0.3, 0.4, 0.5))),
-            text_color: Color::from_rgb(0.6, 0.7, 0.8),
-            border: Border {
-                radius: 8.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
-}
-
-struct TabButtonStyle {
-    is_active: bool,
-}
-
-impl button::StyleSheet for TabButtonStyle {
-    type Style = iced::Theme;
-    
-    fn active(&self, _style: &Self::Style) -> button::Appearance {
-        button::Appearance {
-            background: None,
-            text_color: if self.is_active {
-                Color::from_rgb(1.0, 1.0, 1.0)
-            } else {
-                Color::from_rgb(0.6, 0.7, 0.8)
-            },
-            border: Border {
-                width: if self.is_active { 2.0 } else { 0.0 },
-                color: Color::from_rgb(0.0, 0.68, 0.9),
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        }
-    }
-    
-    fn hovered(&self, style: &Self::Style) -> button::Appearance {
-        let mut appearance = self.active(style);
-        appearance.text_color = Color::from_rgb(1.0, 1.0, 1.0);
-        appearance
-    }
-    
-    fn pressed(&self, style: &Self::Style) -> button::Appearance {
-        self.hovered(style)
-    }
-    
-    fn disabled(&self, style: &Self::Style) -> button::Appearance {
-        self.active(style)
-    }
-}
-
 pub fn view(state: &ChatAppState) -> Element<Message> {
     let username = &state.username;
     let password = &state.password;
@@ -234,7 +74,6 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         Container::new(
             TextInput::new("Enter host...", manual_host)
                 .on_input(Message::ManualHostChanged)
-                .style(InputStyle)
                 .width(Length::Fill)
                 .padding(12)
         )
@@ -250,24 +89,48 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .style(Color::from_rgb(1.0, 1.0, 1.0))
         .horizontal_alignment(iced::alignment::Horizontal::Center);
 
-    // Tabs
-    let login_tab = Button::new(
-        Text::new("Login")
-            .horizontal_alignment(iced::alignment::Horizontal::Center)
-    )
-    .on_press(if !is_login { Message::ToggleLoginRegister } else { Message::None })
-    .style(TabButtonStyle { is_active: is_login })
-    .width(Length::Fill)
-    .padding([8, 16]);
+    // Tabs - usando stili built-in
+    let login_tab = if is_login {
+        Button::new(
+            Text::new("Login")
+                .horizontal_alignment(iced::alignment::Horizontal::Center)
+                .style(Color::from_rgb(1.0, 1.0, 1.0))
+        )
+        .style(iced::theme::Button::Primary)
+        .width(Length::Fill)
+        .padding([8, 16])
+    } else {
+        Button::new(
+            Text::new("Login")
+                .horizontal_alignment(iced::alignment::Horizontal::Center)
+                .style(Color::from_rgb(0.6, 0.7, 0.8))
+        )
+        .on_press(Message::ToggleLoginRegister)
+        .style(iced::theme::Button::Secondary)
+        .width(Length::Fill)
+        .padding([8, 16])
+    };
 
-    let register_tab = Button::new(
-        Text::new("Register")
-            .horizontal_alignment(iced::alignment::Horizontal::Center)
-    )
-    .on_press(if is_login { Message::ToggleLoginRegister } else { Message::None })
-    .style(TabButtonStyle { is_active: !is_login })
-    .width(Length::Fill)
-    .padding([8, 16]);
+    let register_tab = if !is_login {
+        Button::new(
+            Text::new("Register")
+                .horizontal_alignment(iced::alignment::Horizontal::Center)
+                .style(Color::from_rgb(1.0, 1.0, 1.0))
+        )
+        .style(iced::theme::Button::Primary)
+        .width(Length::Fill)
+        .padding([8, 16])
+    } else {
+        Button::new(
+            Text::new("Register")
+                .horizontal_alignment(iced::alignment::Horizontal::Center)
+                .style(Color::from_rgb(0.6, 0.7, 0.8))
+        )
+        .on_press(Message::ToggleLoginRegister)
+        .style(iced::theme::Button::Secondary)
+        .width(Length::Fill)
+        .padding([8, 16])
+    };
 
     let tabs = Row::new()
         .spacing(0)
@@ -277,14 +140,12 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
     // Input fields
     let email_input = TextInput::new("Email", username)
         .on_input(Message::UsernameChanged)
-        .style(InputStyle)
         .width(Length::Fill)
         .padding(12);
 
     let password_input = TextInput::new("Password", password)
         .on_input(Message::PasswordChanged)
         .password()
-        .style(InputStyle)
         .width(Length::Fill)
         .padding(12);
 
@@ -293,17 +154,19 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         Button::new(
             Text::new(if is_login { "Login" } else { "Register" })
                 .horizontal_alignment(iced::alignment::Horizontal::Center)
+                .style(Color::from_rgb(1.0, 1.0, 1.0))
         )
         .on_press(Message::SubmitLoginOrRegister)
-        .style(PrimaryButtonStyle)
+        .style(iced::theme::Button::Primary)
         .width(Length::Fill)
         .padding(12)
     } else {
         Button::new(
             Text::new(if is_login { "Login" } else { "Register" })
                 .horizontal_alignment(iced::alignment::Horizontal::Center)
+                .style(Color::from_rgb(0.6, 0.7, 0.8))
         )
-        .style(PrimaryButtonStyle)
+        .style(iced::theme::Button::Secondary)
         .width(Length::Fill)
         .padding(12)
     };
@@ -346,7 +209,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .push(loading_element);
 
     let card = Container::new(card_content)
-        .style(CardStyle)
+        .style(iced::theme::Container::Box)
         .center_x()
         .center_y();
 
@@ -371,6 +234,6 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
     Container::new(main_content)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(DarkContainerStyle)
+        .style(iced::theme::Container::default())
         .into()
 }
