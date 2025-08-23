@@ -20,8 +20,13 @@ pub enum Message {
     ToggleShowPassword,
     // UI navigation and test actions for messaging features
     OpenFriendRequests,
+    OpenMainActions,
     OpenPrivateChat(String),
     OpenGroupChat(String, String),
+    OpenUsersList { kind: String },
+    UsersSearchQueryChanged(String),
+    UsersSearch,
+    UsersListLoaded { kind: String, list: Vec<String> },
     // Test network actions triggered from main_actions (use defaults in the UI)
     SendGroupMessageTest,
     SendPrivateMessageTest,
@@ -29,4 +34,23 @@ pub enum Message {
     GetPrivateMessagesTest,
     DeleteGroupMessagesTest,
     DeletePrivateMessagesTest,
+    // Friend system actions
+    SendFriendRequest { to: String, message: String },
+    AcceptFriendRequest { from: String },
+    RejectFriendRequest { from: String },
+    ListFriends,
+    ReceivedFriendRequests,
+    SentFriendRequests,
+    // Users and groups actions
+    ListOnlineUsers,
+    ListAllUsers,
+    CreateGroup { name: String },
+    MyGroups,
+    // Group invite / membership actions
+    InviteToGroup { group_id: String, username: String },
+    AcceptGroupInvite { invite_id: String },
+    RejectGroupInvite { invite_id: String },
+    MyGroupInvites,
+    JoinGroup { group_id: String },
+    LeaveGroup { group_id: String },
 }

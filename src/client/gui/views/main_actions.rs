@@ -75,13 +75,15 @@ fn action_card<'a>(icon: &'a str, title: &'a str, detail: &'a str, btn_label: &'
 
     col = col.push(Row::new().push(Space::new(Length::Fill, Length::Fixed(0.0))).push(action_btn).push(Space::new(Length::Fill, Length::Fixed(0.0))));
 
-    // Optional secondary link (text style)
+    // Optional secondary link (text style) - centered under primary action with same width/padding
     if let Some((link_label, link_msg)) = secondary {
         col = col.push(Space::new(Length::Fill, Length::Fixed(8.0)));
-        let link = Button::new(Text::new(link_label))
+        let link_btn = Button::new(Container::new(Text::new(link_label)).width(Length::Fill).center_x())
             .style(iced::theme::Button::Secondary)
-            .on_press(link_msg);
-        col = col.push(link);
+            .on_press(link_msg)
+            .width(Length::Fixed(280.0))
+            .padding(10);
+        col = col.push(Row::new().push(Space::new(Length::Fill, Length::Fixed(0.0))).push(link_btn).push(Space::new(Length::Fill, Length::Fixed(0.0))));
     }
 
     Card::new(Text::new(title).font(BOLD_FONT).style(iced::theme::Text::Default), col)
@@ -138,16 +140,13 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
             .width(Length::Fixed(120.0)),
     ].spacing(1).align_items(Alignment::Center);
 
-    // Center the title precisely while keeping logout on the right:
-    // reserve the logout width on the left so the title container can be centered
-    let reserved_logout_width = 120.0_f32;
+    // Center the title precisely while keeping logout on the right.
     let title_text = Text::new("Ruggine").font(BOLD_FONT).size(35).style(TEXT_PRIMARY);
 
     let header_row = Row::new()
         .align_items(Alignment::Center)
-        .push(Space::new(Length::Fixed(reserved_logout_width), Length::Fixed(0.0)))
         .push(Container::new(title_text).width(Length::Fill).center_x())
-        .push(logout_section);
+        .push(Container::new(logout_section).width(Length::Fixed(120.0)).center_x());
 
     let header = Container::new(header_row)
         .padding([12, 18])
@@ -161,14 +160,14 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
     let subtitle = Container::new(subtitle_row);
 
     // Cards
-    let users_card = Container::new(action_card("👤", "Users", "Browse and start private chats", "View Users", Message::OpenPrivateChat("alice".to_string()), None))
+    let users_card = Container::new(action_card("👤", "Users", "Browse and start private chats", "Online Users", Message::OpenUsersList { kind: "Online".to_string() }, Some(("All Users", Message::OpenUsersList { kind: "All".to_string() }))))
         // Give each card vertical padding to reveal BG_MAIN between cards
         .padding([10, 18, 10, 18])
         .style(iced::theme::Container::Custom(Box::new(card_header_appearance)));
-    let groups_card = Container::new(action_card("👥", "Groups", "Open group chats and manage groups", "View Groups", Message::OpenGroupChat("group-id-demo".to_string(), "GruppoDemo".to_string()), None))
+    let groups_card = Container::new(action_card("👥", "Groups", "Open group chats and manage groups", "My Groups", Message::MyGroups, Some(("Create Group", Message::CreateGroup { name: "NewGroup".to_string() }))))
         .padding([10, 18, 10, 18])
         .style(iced::theme::Container::Custom(Box::new(card_header_appearance)));
-    let invites_card = Container::new(action_card("✉️", "Invites", "See pending invites and accept or reject", "View Invites", Message::GetGroupMessagesTest, None))
+    let invites_card = Container::new(action_card("✉️", "Invites", "See pending invites and accept or reject", "View Invites", Message::GetGroupMessagesTest, Some(("Send Invites", Message::SendGroupMessageTest))))
         .padding([10, 18, 10, 18])
         .style(iced::theme::Container::Custom(Box::new(card_header_appearance)));
     let friends_card = Container::new(action_card(

@@ -7,6 +7,7 @@ pub enum AppState {
     Chat,
     PrivateChat(String),
     GroupChat(String, String),
+    UsersList(String),
     FriendRequests,
 }
 
@@ -35,6 +36,10 @@ pub struct ChatAppState {
     pub welcome_message: Option<String>,
     pub session_token: Option<String>,
     pub show_password: bool, // aggiunto per toggle password
+    // Users list/search UI state
+    pub users_list_cache: Vec<String>,
+    pub users_search_results: Vec<String>,
+    pub users_search_query: String,
 }
 
 impl ChatAppState {
@@ -51,7 +56,36 @@ impl ChatAppState {
             Msg::SubmitLoginOrRegister => {
                 self.loading = true;
                 self.error_message = None;
-                // Qui va la logica di invio comando al server tramite chat_service
+                let username = self.username.clone();
+                let password = self.password.clone();
+                let is_login = self.is_login;
+                let selected_host = self.selected_host.clone();
+                let manual_host = self.manual_host.clone();
+                let svc = chat_service.clone();
+                // determine host
+                let cfg = ClientConfig::from_env();
+                let host = match selected_host {
+                    HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                    HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                    HostType::Manual => manual_host,
+                };
+                return iced::Command::perform(async move {
+                    let mut guard = svc.lock().await;
+                    let cmd = if is_login {
+                        format!("/login {} {}", username, password)
+                    } else {
+                        format!("/register {} {}", username, password)
+                    };
+                    match guard.send_command(&host, cmd).await {
+                        Ok(resp) => {
+                            // parse SESSION token if present
+                            let token = resp.lines().find_map(|l| l.split("SESSION:").nth(1).map(|s| s.trim().to_string()));
+                            let success = resp.starts_with("OK:");
+                            crate::client::models::messages::Message::AuthResult { success, message: resp, token }
+                        }
+                        Err(e) => crate::client::models::messages::Message::AuthResult { success: false, message: format!("ERR: {}", e), token: None },
+                    }
+                }, |m| m);
             }
             Msg::AuthResult { success, message, token } => {
                 self.loading = false;
@@ -182,6 +216,66 @@ impl ChatAppState {
             Msg::OpenFriendRequests => {
                 self.app_state = AppState::FriendRequests;
             }
+            Msg::OpenMainActions => {
+                self.app_state = AppState::MainActions;
+            }
+            Msg::OpenUsersList { kind } => {
+                // when opening, fetch list from server (online or all) and store cache
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Loading {} users...", kind) });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let kind_clone = kind.clone();
+                    return iced::Command::perform(async move {
+                        if kind_clone == "Online" {
+                            match crate::client::services::users_service::UsersService::list_online(&svc, &host).await {
+                                Ok(list) => Msg::UsersListLoaded { kind: kind_clone.clone(), list },
+                                Err(e) => Msg::LogError(format!("Load users failed: {}", e)),
+                            }
+                        } else {
+                            match crate::client::services::users_service::UsersService::list_all(&svc, &host).await {
+                                Ok(list) => Msg::UsersListLoaded { kind: kind_clone.clone(), list },
+                                Err(e) => Msg::LogError(format!("Load users failed: {}", e)),
+                            }
+                        }
+                    }, |m| m);
+                } else {
+                    // no token: still open view but empty cache
+                    self.app_state = AppState::UsersList(kind);
+                }
+            }
+            Msg::UsersListLoaded { kind, list } => {
+                // Exclude current user (case-insensitive) from cache and results
+                let me = self.username.to_lowercase();
+                let filtered: Vec<String> = list.into_iter().filter(|u| u.to_lowercase() != me).collect();
+                self.users_list_cache = filtered.clone();
+                let mut r = filtered;
+                r.truncate(10);
+                self.users_search_results = r;
+                self.app_state = AppState::UsersList(kind);
+            }
+            Msg::UsersSearchQueryChanged(q) => {
+                self.users_search_query = q;
+            }
+            Msg::UsersSearch => {
+                // perform local filter on users_list_cache
+                let q = self.users_search_query.to_lowercase();
+                let me = self.username.to_lowercase();
+                let mut results: Vec<String> = self.users_list_cache.iter()
+                    .filter(|u| {
+                        let lu = u.to_lowercase();
+                        lu.contains(&q) && lu != me
+                    })
+                    .cloned()
+                    .collect();
+                results.truncate(10);
+                self.users_search_results = results;
+            }
             Msg::OpenPrivateChat(username) => {
                 self.app_state = AppState::PrivateChat(username);
             }
@@ -265,6 +359,312 @@ impl ChatAppState {
                         match crate::client::services::friend_service::FriendService::send_private_message(&svc, &host, &token_clone, "alice", "Hello from UI test").await {
                             Ok(r) => Msg::LogInfo(format!("Private send: {}", r)),
                             Err(e) => Msg::LogError(format!("Private send failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            // Friend system actions handlers
+            Msg::SendFriendRequest { to, message } => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Invio richiesta amicizia a {}...", to) });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::friend_service::FriendService::send_friend_request(&svc, &host, &token_clone, &to, &message).await {
+                            Ok(r) => Msg::LogInfo(format!("Friend request: {}", r)),
+                            Err(e) => Msg::LogError(format!("Friend request failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::AcceptFriendRequest { from } => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Accetto richiesta amicizia da {}...", from) });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::friend_service::FriendService::accept_friend_request(&svc, &host, &token_clone, &from).await {
+                            Ok(r) => Msg::LogInfo(format!("Accept request: {}", r)),
+                            Err(e) => Msg::LogError(format!("Accept failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::RejectFriendRequest { from } => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Rifiuto richiesta amicizia da {}...", from) });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::friend_service::FriendService::reject_friend_request(&svc, &host, &token_clone, &from).await {
+                            Ok(r) => Msg::LogInfo(format!("Reject request: {}", r)),
+                            Err(e) => Msg::LogError(format!("Reject failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::ListFriends => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta lista amici...".to_string() });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::friend_service::FriendService::list_friends(&svc, &host, &token_clone).await {
+                            Ok(list) => Msg::LogInfo(format!("Friends: {}", list.join(", "))),
+                            Err(e) => Msg::LogError(format!("List friends failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::ListOnlineUsers => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta utenti online...".to_string() });
+                let cfg = ClientConfig::from_env();
+                let host = match self.selected_host {
+                    HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                    HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                    HostType::Manual => self.manual_host.clone(),
+                };
+                let svc = chat_service.clone();
+                return iced::Command::perform(async move {
+                    match crate::client::services::users_service::UsersService::list_online(&svc, &host).await {
+                        Ok(list) => Msg::LogInfo(format!("Online: {}", list.join(", "))),
+                        Err(e) => Msg::LogError(format!("List online failed: {}", e)),
+                    }
+                }, |m| m);
+            }
+            Msg::ListAllUsers => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta lista utenti...".to_string() });
+                let cfg = ClientConfig::from_env();
+                let host = match self.selected_host {
+                    HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                    HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                    HostType::Manual => self.manual_host.clone(),
+                };
+                let svc = chat_service.clone();
+                return iced::Command::perform(async move {
+                    match crate::client::services::users_service::UsersService::list_all(&svc, &host).await {
+                        Ok(list) => Msg::LogInfo(format!("All users: {}", list.join(", "))),
+                        Err(e) => Msg::LogError(format!("List all failed: {}", e)),
+                    }
+                }, |m| m);
+            }
+            Msg::CreateGroup { name } => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Creazione gruppo {}...", name) });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::group_service::GroupService::create_group(&svc, &host, &token_clone, &name).await {
+                            Ok(r) => Msg::LogInfo(format!("Create group: {}", r)),
+                            Err(e) => Msg::LogError(format!("Create group failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            // Group invite and membership actions
+            Msg::InviteToGroup { group_id, username } => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Invito {} al gruppo {}...", username, group_id) });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let group = group_id.clone();
+                    let user = username.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::group_service::GroupService::invite(&svc, &host, &token_clone, &group, &user).await {
+                            Ok(r) => Msg::LogInfo(format!("Invite: {}", r)),
+                            Err(e) => Msg::LogError(format!("Invite failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::AcceptGroupInvite { invite_id } => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Accetto invito gruppo {}...", invite_id) });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let invite = invite_id.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::group_service::GroupService::accept_invite(&svc, &host, &token_clone, &invite).await {
+                            Ok(r) => Msg::LogInfo(format!("Accept invite: {}", r)),
+                            Err(e) => Msg::LogError(format!("Accept invite failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::RejectGroupInvite { invite_id } => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Rifiuto invito gruppo {}...", invite_id) });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let invite = invite_id.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::group_service::GroupService::reject_invite(&svc, &host, &token_clone, &invite).await {
+                            Ok(r) => Msg::LogInfo(format!("Reject invite: {}", r)),
+                            Err(e) => Msg::LogError(format!("Reject invite failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::MyGroupInvites => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta miei inviti di gruppo...".to_string() });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::group_service::GroupService::my_invites(&svc, &host, &token_clone).await {
+                            Ok(list) => Msg::LogInfo(format!("Invites: {}", list.join(" | "))),
+                            Err(e) => Msg::LogError(format!("My invites failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::JoinGroup { group_id } => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Join gruppo {}...", group_id) });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let group = group_id.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::group_service::GroupService::join_group(&svc, &host, &token_clone, &group).await {
+                            Ok(r) => Msg::LogInfo(format!("Join group: {}", r)),
+                            Err(e) => Msg::LogError(format!("Join group failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::LeaveGroup { group_id } => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Leave gruppo {}...", group_id) });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let group = group_id.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::group_service::GroupService::leave_group(&svc, &host, &token_clone, &group).await {
+                            Ok(r) => Msg::LogInfo(format!("Leave group: {}", r)),
+                            Err(e) => Msg::LogError(format!("Leave group failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::MyGroups => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta miei gruppi...".to_string() });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::group_service::GroupService::my_groups(&svc, &host, &token_clone).await {
+                            Ok(list) => Msg::LogInfo(format!("My groups: {}", list.join(", "))),
+                            Err(e) => Msg::LogError(format!("My groups failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::ReceivedFriendRequests => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta richieste ricevute...".to_string() });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::friend_service::FriendService::received_friend_requests(&svc, &host, &token_clone).await {
+                            Ok(list) => Msg::LogInfo(format!("Received requests: {}", list.join(" | "))),
+                            Err(e) => Msg::LogError(format!("Received requests failed: {}", e)),
+                        }
+                    }, |m| m);
+                }
+            }
+            Msg::SentFriendRequests => {
+                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta richieste inviate...".to_string() });
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    return iced::Command::perform(async move {
+                        match crate::client::services::friend_service::FriendService::sent_friend_requests(&svc, &host, &token_clone).await {
+                            Ok(list) => Msg::LogInfo(format!("Sent requests: {}", list.join(" | "))),
+                            Err(e) => Msg::LogError(format!("Sent requests failed: {}", e)),
                         }
                     }, |m| m);
                 }

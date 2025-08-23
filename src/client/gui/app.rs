@@ -126,6 +126,7 @@ impl Application for ChatApp {
             AppState::MainActions => crate::client::gui::views::main_actions::view(&self.state),
             AppState::PrivateChat(username) => crate::client::gui::views::private_chat::view(&self.state, username),
             AppState::GroupChat(group_id, group_name) => crate::client::gui::views::group_chat::view(&self.state, group_id, group_name),
+            AppState::UsersList(kind) => crate::client::gui::views::users_list::view(&self.state, kind),
             AppState::FriendRequests => crate::client::gui::views::friend_requests::view(&self.state),
             AppState::Chat => crate::client::gui::views::main_actions::view(&self.state),
         }

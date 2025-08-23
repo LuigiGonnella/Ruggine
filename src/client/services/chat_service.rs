@@ -3,6 +3,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{sleep, Duration};
 use std::sync::Arc;
+use crate::client::services::message_parser;
 
 #[derive(Default)]
 pub struct ChatService {
@@ -174,10 +175,20 @@ impl ChatService {
     }
 
     // Placeholder methods for later
-    pub fn send_private_message(&mut self, _to: &str, _msg: &str) {
-        // TODO
+    /// Send a private message using the existing send_command implementation.
+    /// Returns the raw server response.
+    pub async fn send_private_message(&mut self, host: &str, session_token: &str, to: &str, msg: &str) -> anyhow::Result<String> {
+    // server expects /send_private_message
+    let cmd = format!("/send_private_message {} {} {}", session_token, to, msg);
+        let resp = self.send_command(host, cmd).await?;
+        Ok(resp)
     }
-    pub fn get_private_messages(&self, _with: &str) -> Vec<String> {
-        vec![]
+
+    /// Retrieve private messages with another user and return them parsed as Vec<String>.
+    pub async fn get_private_messages(&mut self, host: &str, session_token: &str, with: &str) -> anyhow::Result<Vec<String>> {
+        let cmd = format!("/get_private_messages {} {}", session_token, with);
+        let resp = self.send_command(host, cmd).await?;
+        let msgs = message_parser::parse_messages(&resp).map_err(|e| anyhow::anyhow!(e))?;
+        Ok(msgs)
     }
 }

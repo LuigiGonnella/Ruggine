@@ -206,7 +206,7 @@ impl Server {
             "/login" if args.len() == 2 => {
                 auth::login(self.db.clone(), args[0], args[1], &self.config).await
             }
-            "/users" => {
+            "/online_users" => {
                 users::list_online(self.db.clone()).await
             }
             "/all_users" => {
@@ -229,7 +229,7 @@ impl Server {
                     "ERR: Invalid or expired session".to_string()
                 }
             }
-            "/invite" if args.len() == 3 => {
+            "/invite_to_group" if args.len() == 3 => {
                 let session_token = args[0];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
                     groups::invite(self.db.clone(), &uid, args[1], args[2]).await
@@ -237,7 +237,7 @@ impl Server {
                     "ERR: Invalid or expired session".to_string()
                 }
             }
-            "/accept_invite" if args.len() == 2 => {
+            "/accept_group_invite" if args.len() == 2 => {
                 let session_token = args[0];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
                     groups::accept_invite(self.db.clone(), &uid, args[1]).await
@@ -245,7 +245,7 @@ impl Server {
                     "ERR: Invalid or expired session".to_string()
                 }
             }
-            "/reject_invite" if args.len() == 2 => {
+            "/reject_group_invite" if args.len() == 2 => {
                 let session_token = args[0];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
                     groups::reject_invite(self.db.clone(), &uid, args[1]).await
@@ -253,7 +253,7 @@ impl Server {
                     "ERR: Invalid or expired session".to_string()
                 }
             }
-            "/my_invites" if args.len() == 1 => {
+            "/my_group_invites" if args.len() == 1 => {
                 let session_token = args[0];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
                     groups::my_invites(self.db.clone(), &uid).await
@@ -278,13 +278,13 @@ impl Server {
                 }
             }
             // MESSAGGI
-            "/send_group" if args.len() >= 3 => {
+            "/send_group_message" if args.len() >= 3 => {
                 let session_token = args[0];
                 let group_name = args[1];
                 let message = &args[2..].join(" ");
                 messages::send_group_message(self.db.clone(), session_token, group_name, message, &self.config).await
             }
-            "/send_private"  if args.len() >= 3 => {
+            "/send_private_message"  if args.len() >= 3 => {
                 let session_token = args[0];
                 let to_username = args[1];
                 let message = &args[2..].join(" ");
