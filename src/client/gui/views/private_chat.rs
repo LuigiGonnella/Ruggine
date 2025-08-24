@@ -160,24 +160,29 @@ fn create_message_bubble<'a>(msg: &'a crate::client::models::app_state::ChatMess
 }
 
 fn build_input_area<'a>(state: &'a ChatAppState, username: &'a str) -> Element<'a, Message> {
-    let message_input = TextInput::new("Scrivi un messaggio...", &state.current_message_input)
+    // Create the TextInput and wrap it in a Container to reproduce the
+    // desired background, border and radius without implementing a
+    // custom `text_input::StyleSheet` trait. This keeps the style while
+    // avoiding trait mismatch issues across iced versions.
+    let raw_input = TextInput::new("Scrivi un messaggio...", &state.current_message_input)
         .on_input(Message::MessageInputChanged)
         .on_submit(Message::SendPrivateMessage { to: username.to_string() })
         .padding(12)
         .size(14)
+        .width(Length::Fill);
+
+    let message_input = Container::new(raw_input)
+        .padding(0)
         .width(Length::Fill)
-        .style(iced::theme::TextInput::Custom(Box::new(|_: &iced::Theme, _| {
-            iced::widget::text_input::Appearance {
-                background: iced::Background::Color(INPUT_BG),
+        .style(iced::theme::Container::Custom(Box::new(|_: &iced::Theme| {
+            iced::widget::container::Appearance {
+                background: Some(iced::Background::Color(INPUT_BG)),
                 border: iced::Border {
                     radius: 20.0.into(),
                     width: 1.0,
                     color: Color::from_rgb(0.3, 0.3, 0.3),
                 },
-                icon_color: TEXT_SECONDARY,
-                placeholder_color: TEXT_SECONDARY,
-                value_color: TEXT_PRIMARY,
-                selection_color: MY_MESSAGE_BG,
+                ..Default::default()
             }
         })));
 

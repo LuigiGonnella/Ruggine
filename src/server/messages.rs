@@ -173,7 +173,7 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
             let msgs: Vec<String> = rows.iter().map(|r| {
                 let sender: String = r.get("sender_id");
                 // Converti sender_id in username
-                let sender_name = if sender_id == user_id {
+                let sender_name = if sender == user_id {
                     my_username.clone()
                 } else {
                     other_username.to_string()
