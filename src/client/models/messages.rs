@@ -58,4 +58,8 @@ pub enum Message {
     SendPrivateMessage { to: String },
     LoadPrivateMessages { with: String },
     PrivateMessagesLoaded { with: String, messages: Vec<crate::client::models::app_state::ChatMessage> },
+    // Real-time message updates
+    StartMessagePolling { with: String },
+    StopMessagePolling,
+    NewMessagesReceived { with: String, messages: Vec<crate::client::models::app_state::ChatMessage> },
 }

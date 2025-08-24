@@ -111,6 +111,75 @@ impl Application for ChatApp {
                     |msg| msg,
                 );
             }
+            Msg::StartMessagePolling { with } => {
+                if !self.state.polling_active {
+                    self.state.polling_active = true;
+                    let svc = self.chat_service.clone();
+                    let token = self.state.session_token.clone().unwrap_or_default();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let username = with.clone();
+                    
+                    return Command::perform(
+                        async move {
+                            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
+                            loop {
+                                interval.tick().await;
+                                
+                                let mut guard = svc.lock().await;
+                                match guard.get_private_messages(&host, &token, &username).await {
+                                    Ok(messages) => {
+                                        drop(guard);
+                                        return Msg::NewMessagesReceived { with: username.clone(), messages };
+                                    }
+                                    Err(_) => {
+                                        // Continue polling on error
+                                        drop(guard);
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                    }
+                                }
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+                Command::none()
+            }
+            Msg::StopMessagePolling => {
+                self.state.polling_active = false;
+                Command::none()
+            }
+            Msg::NewMessagesReceived { with, messages } => {
+                if self.state.polling_active {
+                    self.state.private_chats.insert(with.clone(), messages);
+                    
+                    // Continue polling
+                    let svc = self.chat_service.clone();
+                    let token = self.state.session_token.clone().unwrap_or_default();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let username = with.clone();
+                    
+                    return Command::perform(
+                        async move {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            let mut guard = svc.lock().await;
+                            match guard.get_private_messages(&host, &token, &username).await {
+                                Ok(messages) => {
+                                    drop(guard);
+                                    Msg::NewMessagesReceived { with: username.clone(), messages }
+                                }
+                                Err(_) => {
+                                    drop(guard);
+                                    Msg::NewMessagesReceived { with: username.clone(), messages: vec![] }
+                                }
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+                Command::none()
+            }
             _ => {}
         }
     self.state.update(message, &self.chat_service)
