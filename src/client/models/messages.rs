@@ -62,4 +62,5 @@ pub enum Message {
     StartMessagePolling { with: String },
     StopMessagePolling,
     NewMessagesReceived { with: String, messages: Vec<crate::client::models::app_state::ChatMessage> },
+    TriggerImmediateRefresh { with: String },
 }

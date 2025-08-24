@@ -122,7 +122,7 @@ impl Application for ChatApp {
                     
                     return Command::perform(
                         async move {
-                            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
+                            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
                             loop {
                                 interval.tick().await;
                                 
@@ -135,7 +135,7 @@ impl Application for ChatApp {
                                     Err(_) => {
                                         // Continue polling on error
                                         drop(guard);
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
                                     }
                                 }
                             }
@@ -162,7 +162,7 @@ impl Application for ChatApp {
                     
                     return Command::perform(
                         async move {
-                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                             let mut guard = svc.lock().await;
                             match guard.get_private_messages(&host, &token, &username).await {
                                 Ok(messages) => {
@@ -179,6 +179,31 @@ impl Application for ChatApp {
                     );
                 }
                 Command::none()
+            }
+            Msg::TriggerImmediateRefresh { with } => {
+                // Force an immediate message refresh without waiting for the next polling cycle
+                let svc = self.chat_service.clone();
+                let token = self.state.session_token.clone().unwrap_or_default();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                let username = with.clone();
+                
+                return Command::perform(
+                    async move {
+                        let mut guard = svc.lock().await;
+                        match guard.get_private_messages(&host, &token, &username).await {
+                            Ok(messages) => {
+                                drop(guard);
+                                Msg::NewMessagesReceived { with: username.clone(), messages }
+                            }
+                            Err(_) => {
+                                drop(guard);
+                                Msg::NewMessagesReceived { with: username.clone(), messages: vec![] }
+                            }
+                        }
+                    },
+                    |msg| msg,
+                );
             }
             _ => {}
         }

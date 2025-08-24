@@ -231,6 +231,10 @@ impl ChatAppState {
                 self.app_state = AppState::FriendRequests;
             }
             Msg::OpenMainActions => {
+                // Stop polling when leaving private chat
+                if matches!(self.app_state, AppState::PrivateChat(_)) {
+                    self.polling_active = false;
+                }
                 self.app_state = AppState::MainActions;
             }
             Msg::OpenUsersList { kind } => {
@@ -371,6 +375,8 @@ impl ChatAppState {
             // Quick test network actions
             Msg::SendGroupMessageTest => {
                 self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Invio messaggio di gruppo (test)...".to_string() });
+                                            // Trigger immediate refresh for the recipient
+                                            Message::TriggerImmediateRefresh { with: to.clone() }
                 // Perform async network call via shared ChatService
                 if let Some(token) = self.session_token.clone() {
                     let cfg = ClientConfig::from_env();

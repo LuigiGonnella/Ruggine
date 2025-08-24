@@ -3,11 +3,11 @@ use iced::widget::{Column, Row, Text, TextInput, Button, Container, Scrollable, 
 use crate::client::models::messages::Message;
 use crate::client::models::app_state::ChatAppState;
 
-// Color palette per chat moderna
+// Color palette per chat moderna (WhatsApp-like)
 const BG_MAIN: Color = Color::from_rgb(0.06, 0.07, 0.18); // Deep navy
 const CHAT_BG: Color = Color::from_rgb(0.08, 0.09, 0.20); // Slightly lighter for chat area
-const MY_MESSAGE_BG: Color = Color::from_rgb(0.2, 0.4, 0.8); // Blue for sent messages
-const OTHER_MESSAGE_BG: Color = Color::from_rgb(0.15, 0.16, 0.32); // Gray for received messages
+const MY_MESSAGE_BG: Color = Color::from_rgb(0.0, 0.7, 0.3); // Green for my messages (WhatsApp style)
+const OTHER_MESSAGE_BG: Color = Color::from_rgb(0.2, 0.4, 0.8); // Blue for received messages
 const INPUT_BG: Color = Color::from_rgb(0.12, 0.13, 0.26); // Input background
 const TEXT_PRIMARY: Color = Color::WHITE;
 const TEXT_SECONDARY: Color = Color::from_rgb(0.7, 0.7, 0.7);
@@ -136,7 +136,7 @@ fn create_message_bubble<'a>(msg: &'a crate::client::models::app_state::ChatMess
     let message_content = Column::new()
         .push(Text::new(&msg.content).size(14).style(TEXT_PRIMARY))
         .push(Space::new(Length::Fixed(0.0), Length::Fixed(4.0)))
-        .push(Text::new(&msg.timestamp).size(10).style(TEXT_SECONDARY))
+        .push(Text::new(&msg.formatted_time).size(10).style(TEXT_SECONDARY))
         .spacing(2);
 
     let bubble = Container::new(message_content)
@@ -151,11 +151,18 @@ fn create_message_bubble<'a>(msg: &'a crate::client::models::app_state::ChatMess
                 ..Default::default()
             }
         })))
-        .width(Length::Fixed(250.0));
+        .width(Length::Fixed(280.0));
+
+    // Create alignment container
+    let alignment = if is_my_message { 
+        iced::alignment::Horizontal::Right 
+    } else { 
+        iced::alignment::Horizontal::Left 
+    };
 
     Container::new(bubble)
         .width(Length::Fill)
-        .align_x(if is_my_message { iced::alignment::Horizontal::Right } else { iced::alignment::Horizontal::Left })
+        .align_x(alignment)
         .into()
 }
 
