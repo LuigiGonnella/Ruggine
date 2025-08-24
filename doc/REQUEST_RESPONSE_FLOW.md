@@ -33,7 +33,7 @@ Questa pagina descrive il comportamento corrente nel repository: come il server 
 3. Logout
 - Comando `/logout <token>` delegato a `auth::logout`.
 - Il server cancella le sessioni corrispondenti al token e imposta `users.is_online = 0` dentro la transazione di logout.
-- Dopo il logout, la logica di connessione tenta di risolvere l'user_id dal token (se possibile) e quindi chiama `presence.kick_all(&user_id)` per forzare la disconnessione delle connessioni collegate a quel token; inserisce inoltre un evento `session_events` con `event_type = 'logout'` o `'kicked_out'` a seconda del caso.
+
 
 4. Fine connessione
 - Quando una connessione termina (read == 0 o `kick_rx` innescato), la connessione fa `presence.unregister_one(&user_id)`.
