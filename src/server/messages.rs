@@ -233,6 +233,17 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
         Some(uid) => uid,
         None => return "ERR: Invalid session".to_string(),
     };
+    
+    // Ottieni anche il nostro username per i messaggi
+    let my_username = match sqlx::query("SELECT username FROM users WHERE id = ?")
+        .bind(&user_id)
+        .fetch_optional(&db.pool)
+        .await
+    {
+        Ok(Some(row)) => row.get::<String,_>("username"),
+        _ => "Unknown".to_string(),
+    };
+    
     let to_row = sqlx::query("SELECT id FROM users WHERE username = ?")
         .bind(other_username)
         .fetch_optional(&db.pool)
@@ -252,6 +263,7 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
         Ok(rows) => {
             let msgs: Vec<String> = rows.iter().filter_map(|r| {
                 let sender: String = r.get("sender_id");
+<<<<<<< HEAD
                 let encrypted_msg: String = r.get("message");
                 let ts: i64 = r.get("sent_at");
                 
@@ -263,6 +275,17 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
                         Some(format!("[{}] {}: [DECRYPTION FAILED]", ts, sender))
                     }
                 }
+=======
+                // Converti sender_id in username
+                let sender_name = if sender == user_id {
+                    my_username.clone()
+                } else {
+                    other_username.to_string()
+                };
+                let msg: String = r.get("message");
+                let ts: i64 = r.get("sent_at");
+                format!("[{}] {}: {}", ts, sender_name, msg)
+>>>>>>> b08dc3b595f658f02b31de5ddc0ef5aa6b30a912
             }).collect();
             format!("OK: Messages:\n{}", msgs.join("\n"))
         }
