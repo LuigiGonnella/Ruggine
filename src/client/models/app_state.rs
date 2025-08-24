@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone)]
 pub enum AppState {
     CheckingSession,
@@ -310,7 +309,10 @@ impl ChatAppState {
                                 Ok(raw_messages) => {
                                     // Parsa i messaggi dal formato server
                                     let messages = parse_server_messages(&raw_messages, &user_clone);
-                                    Msg::PrivateMessagesLoaded { with: user_clone, messages }
+                                    // Ordina i messaggi per timestamp
+                                    let mut sorted_messages = messages;
+                                    sorted_messages.sort_by_key(|m| m.sent_at);
+                                    Msg::PrivateMessagesLoaded { with: user_clone, messages: sorted_messages }
                                 }
                                 Err(e) => Msg::LogError(format!("Caricamento messaggi fallito: {}", e)),
                             }
@@ -809,13 +811,8 @@ fn parse_server_messages(raw_messages: &[String], other_username: &str) -> Vec<C
                     let datetime = chrono::DateTime::from_timestamp(timestamp, 0)?;
                     let formatted_time = datetime.format("%H:%M").to_string();
                     
-                    // Determina se il messaggio è nostro o dell'altro utente
-                    // Il server restituisce user_id, ma noi vogliamo username
-                    let sender = if sender_part.len() > 10 { // Probabilmente un UUID
-                        other_username.to_string() // Assumiamo sia dell'altro utente
-                    } else {
-                        sender_part.to_string()
-                    };
+                    // Il server ora restituisce già gli username
+                    let sender = sender_part.to_string();
                     
                     return Some(ChatMessage {
                         sender,
