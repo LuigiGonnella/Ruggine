@@ -782,9 +782,8 @@ impl ChatAppState {
             }
             Msg::TriggerImmediateRefresh { with: _ } => {
                 // This message is handled at the app level
-                iced::Command::none()
             }
-            _ => iced::Command::none(),
+            _ => (),
         }
         iced::Command::none()
     }
