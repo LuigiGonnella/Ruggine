@@ -78,16 +78,29 @@ fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Elemen
 
     // Ottieni i messaggi per questa chat dalla cache
     if let Some(chat_messages) = state.private_chats.get(username) {
-        for msg in chat_messages.iter() {
-            let is_my_message = msg.sender == state.username;
-            let message_bubble = create_message_bubble(msg, is_my_message);
-            messages_column = messages_column.push(message_bubble);
+        if chat_messages.is_empty() {
+            messages_column = messages_column.push(
+                Container::new(
+                    Text::new("Nessun messaggio ancora. Inizia la conversazione!")
+                        .size(14)
+                        .style(TEXT_SECONDARY)
+                )
+                .width(Length::Fill)
+                .center_x()
+                .padding(20)
+            );
+        } else {
+            for msg in chat_messages.iter() {
+                let is_my_message = msg.sender == state.username;
+                let message_bubble = create_message_bubble(msg, is_my_message);
+                messages_column = messages_column.push(message_bubble);
+            }
         }
     } else {
-        // Messaggio di caricamento o chat vuota
+        // Messaggio di caricamento
         messages_column = messages_column.push(
             Container::new(
-                Text::new("Carica i messaggi o inizia una nuova conversazione")
+                Text::new("Caricamento messaggi...")
                     .size(14)
                     .style(TEXT_SECONDARY)
             )
@@ -96,6 +109,9 @@ fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Elemen
             .padding(20)
         );
     }
+
+    // Aggiungi un po' di spazio in fondo per evitare che l'ultimo messaggio sia troppo vicino all'input
+    messages_column = messages_column.push(Space::new(Length::Fixed(0.0), Length::Fixed(20.0)));
 
     // Scrollable container per i messaggi
     Container::new(
@@ -116,7 +132,6 @@ fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Elemen
 
 fn create_message_bubble<'a>(msg: &'a crate::client::models::app_state::ChatMessage, is_my_message: bool) -> Element<'a, Message> {
     let bubble_color = if is_my_message { MY_MESSAGE_BG } else { OTHER_MESSAGE_BG };
-    let alignment = if is_my_message { Alignment::End } else { Alignment::Start };
 
     let message_content = Column::new()
         .push(Text::new(&msg.content).size(14).style(TEXT_PRIMARY))
