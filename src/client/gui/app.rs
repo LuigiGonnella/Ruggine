@@ -143,15 +143,15 @@ impl Application for ChatApp {
                         |msg| msg,
                     );
                 }
-                Command::none()
+                ()
             }
             Msg::StopMessagePolling => {
                 self.state.polling_active = false;
-                Command::none()
+                ()
             }
             Msg::NewMessagesReceived { with, messages } => {
                 if self.state.polling_active {
-                    self.state.private_chats.insert(with.clone(), messages);
+                    self.state.private_chats.insert(with.clone(), messages.to_vec());
                     
                     // Continue polling
                     let svc = self.chat_service.clone();
@@ -162,7 +162,7 @@ impl Application for ChatApp {
                     
                     return Command::perform(
                         async move {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
                             let mut guard = svc.lock().await;
                             match guard.get_private_messages(&host, &token, &username).await {
                                 Ok(messages) => {
@@ -178,7 +178,6 @@ impl Application for ChatApp {
                         |msg| msg,
                     );
                 }
-                Command::none()
             }
             Msg::TriggerImmediateRefresh { with } => {
                 // Force an immediate message refresh without waiting for the next polling cycle

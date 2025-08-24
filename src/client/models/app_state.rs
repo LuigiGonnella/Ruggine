@@ -1,3 +1,4 @@
+use crate::client::models::messages::Message;
 #[derive(Debug, Clone)]
 pub enum AppState {
     CheckingSession,
@@ -19,7 +20,7 @@ impl Default for AppState {
 
 use crate::client::gui::views::registration::HostType;
 use crate::client::gui::views::logger::LogMessage;
-use tokio::sync::mpsc;
+
 use crate::server::config::ClientConfig;
 use std::collections::HashMap;
 
@@ -52,8 +53,9 @@ pub struct ChatAppState {
     pub users_search_query: String,
     // Private chat state
     pub private_chats: HashMap<String, Vec<ChatMessage>>,
-    pub message_receiver: Option<mpsc::UnboundedReceiver<(String, Vec<ChatMessage>)>>,
+    // pub message_receiver: Option<mpsc::UnboundedReceiver<(String, Vec<ChatMessage>)>>,
     pub current_message_input: String,
+    pub polling_active: bool, // Stato polling per chat privata
 }
 
 impl ChatAppState {
@@ -353,7 +355,8 @@ impl ChatAppState {
                         let chat_message = ChatMessage {
                             sender: sender.clone(),
                             content: message_content.clone(),
-                            timestamp: now.format("%H:%M").to_string(),
+                            timestamp: now.timestamp(),
+                            formatted_time: now.format("%H:%M").to_string(),
                             sent_at: now.timestamp(),
                         };
                         
@@ -376,7 +379,7 @@ impl ChatAppState {
             Msg::SendGroupMessageTest => {
                 self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Invio messaggio di gruppo (test)...".to_string() });
                                             // Trigger immediate refresh for the recipient
-                                            Message::TriggerImmediateRefresh { with: to.clone() }
+                                            //Message::TriggerImmediateRefresh { with: to.clone() };
                 // Perform async network call via shared ChatService
                 if let Some(token) = self.session_token.clone() {
                     let cfg = ClientConfig::from_env();
@@ -533,36 +536,14 @@ impl ChatAppState {
                 }
             }
             Msg::ListOnlineUsers => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta utenti online...".to_string() });
-                let cfg = ClientConfig::from_env();
-                let host = match self.selected_host {
-                    HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                    HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                    HostType::Manual => self.manual_host.clone(),
-                };
-                let svc = chat_service.clone();
-                return iced::Command::perform(async move {
-                    match crate::client::services::users_service::UsersService::list_online(&svc, &host).await {
-                        Ok(list) => Msg::LogInfo(format!("Online: {}", list.join(", "))),
-                        Err(e) => Msg::LogError(format!("List online failed: {}", e)),
-                    }
-                }, |m| m);
+                // Cambia subito la view e invia il comando di caricamento utenti online
+                self.app_state = AppState::UsersList("Online".to_string());
+                return self.update(Message::OpenUsersList { kind: "Online".to_string() }, chat_service);
             }
             Msg::ListAllUsers => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta lista utenti...".to_string() });
-                let cfg = ClientConfig::from_env();
-                let host = match self.selected_host {
-                    HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                    HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                    HostType::Manual => self.manual_host.clone(),
-                };
-                let svc = chat_service.clone();
-                return iced::Command::perform(async move {
-                    match crate::client::services::users_service::UsersService::list_all(&svc, &host).await {
-                        Ok(list) => Msg::LogInfo(format!("All users: {}", list.join(", "))),
-                        Err(e) => Msg::LogError(format!("List all failed: {}", e)),
-                    }
-                }, |m| m);
+                // Cambia subito la view e invia il comando di caricamento utenti tutti
+                self.app_state = AppState::UsersList("All".to_string());
+                return self.update(Message::OpenUsersList { kind: "All".to_string() }, chat_service);
             }
             Msg::CreateGroup { name } => {
                 self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Creazione gruppo {}...", name) });
@@ -814,12 +795,12 @@ fn parse_server_messages(raw_messages: &[String], other_username: &str) -> Vec<C
                 let timestamp_str = &line[1..bracket_end];
                 let sender_part = &line[bracket_end + 2..bracket_end + colon_pos];
                 let message_content = &line[bracket_end + colon_pos + 2..];
-                
+
                 // Converti timestamp Unix in formato leggibile
                 if let Ok(timestamp) = timestamp_str.parse::<i64>() {
-                    let datetime = chrono::DateTime::from_timestamp(timestamp, 0)?;
+                    let datetime = chrono::DateTime::from_timestamp(timestamp, 0).unwrap_or_else(|| chrono::Utc::now());
                     let formatted_time = datetime.format("%H:%M").to_string();
-                    
+
                     // Determina se il messaggio è nostro o dell'altro utente
                     // Il server restituisce user_id, ma noi vogliamo username
                     let sender = if sender_part.len() > 10 { // Probabilmente un UUID
@@ -827,15 +808,17 @@ fn parse_server_messages(raw_messages: &[String], other_username: &str) -> Vec<C
                     } else {
                         sender_part.to_string()
                     };
-                    
+
                     return Some(ChatMessage {
                         sender,
                         content: message_content.to_string(),
-                        timestamp: formatted_time,
+                        timestamp,
+                        formatted_time,
                         sent_at: timestamp,
                     });
                 }
             }
         }
         None
+    }).collect()
 }

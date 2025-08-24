@@ -55,6 +55,7 @@ pub fn parse_private_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static s
                                 content,
                                 timestamp,
                                 formatted_time,
+                                sent_at: timestamp,
                             });
                         }
                     }

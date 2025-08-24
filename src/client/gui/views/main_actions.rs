@@ -160,7 +160,14 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
     let subtitle = Container::new(subtitle_row);
 
     // Cards
-    let users_card = Container::new(action_card("👤", "Users", "Browse and start private chats", "Online Users", Message::OpenUsersList { kind: "Online".to_string() }, Some(("All Users", Message::OpenUsersList { kind: "All".to_string() }))))
+    let users_card = Container::new(action_card(
+        "👤",
+        "Users",
+        "Browse and start private chats",
+        "Online Users",
+        Message::ListOnlineUsers,
+        Some(("All Users", Message::ListAllUsers))
+    ))
         // Give each card vertical padding to reveal BG_MAIN between cards
         .padding([10, 18, 10, 18])
         .style(iced::theme::Container::Custom(Box::new(card_header_appearance)));
