@@ -53,4 +53,9 @@ pub enum Message {
     MyGroupInvites,
     JoinGroup { group_id: String },
     LeaveGroup { group_id: String },
+    // Private chat messages
+    MessageInputChanged(String),
+    SendPrivateMessage { to: String },
+    LoadPrivateMessages { with: String },
+    PrivateMessagesLoaded { with: String, messages: Vec<crate::client::models::app_state::ChatMessage> },
 }

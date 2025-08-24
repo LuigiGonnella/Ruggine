@@ -142,6 +142,17 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
         Some(uid) => uid,
         None => return "ERR: Invalid session".to_string(),
     };
+    
+    // Ottieni anche il nostro username per i messaggi
+    let my_username = match sqlx::query("SELECT username FROM users WHERE id = ?")
+        .bind(&user_id)
+        .fetch_optional(&db.pool)
+        .await
+    {
+        Ok(Some(row)) => row.get::<String,_>("username"),
+        _ => "Unknown".to_string(),
+    };
+    
     let to_row = sqlx::query("SELECT id FROM users WHERE username = ?")
         .bind(other_username)
         .fetch_optional(&db.pool)
@@ -161,9 +172,15 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
         Ok(rows) => {
             let msgs: Vec<String> = rows.iter().map(|r| {
                 let sender: String = r.get("sender_id");
+                // Converti sender_id in username
+                let sender_name = if sender_id == user_id {
+                    my_username.clone()
+                } else {
+                    other_username.to_string()
+                };
                 let msg: String = r.get("message");
                 let ts: i64 = r.get("sent_at");
-                format!("[{}] {}: {}", ts, sender, msg)
+                format!("[{}] {}: {}", ts, sender_name, msg)
             }).collect();
             format!("OK: Messages:\n{}", msgs.join("\n"))
         }

@@ -21,6 +21,15 @@ impl Default for AppState {
 use crate::client::gui::views::registration::HostType;
 use crate::client::gui::views::logger::LogMessage;
 use crate::server::config::ClientConfig;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub sender: String,
+    pub content: String,
+    pub timestamp: String,
+    pub sent_at: i64,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ChatAppState {
@@ -40,6 +49,9 @@ pub struct ChatAppState {
     pub users_list_cache: Vec<String>,
     pub users_search_results: Vec<String>,
     pub users_search_query: String,
+    // Private chat state
+    pub private_chats: HashMap<String, Vec<ChatMessage>>,
+    pub current_message_input: String,
 }
 
 impl ChatAppState {
@@ -277,7 +289,76 @@ impl ChatAppState {
                 self.users_search_results = results;
             }
             Msg::OpenPrivateChat(username) => {
+                // Carica i messaggi per questa chat quando si apre
+                let username_clone = username.clone();
                 self.app_state = AppState::PrivateChat(username);
+                
+                // Se non abbiamo già i messaggi in cache, caricali
+                if !self.private_chats.contains_key(&username_clone) {
+                    if let Some(token) = self.session_token.clone() {
+                        let cfg = ClientConfig::from_env();
+                        let host = match self.selected_host {
+                            HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                            HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                            HostType::Manual => self.manual_host.clone(),
+                        };
+                        let svc = chat_service.clone();
+                        let token_clone = token.clone();
+                        let user_clone = username_clone.clone();
+                        return iced::Command::perform(async move {
+                            match crate::client::services::friend_service::FriendService::get_private_messages(&svc, &host, &token_clone, &user_clone).await {
+                                Ok(raw_messages) => {
+                                    // Parsa i messaggi dal formato server
+                                    let messages = parse_server_messages(&raw_messages, &user_clone);
+                                    Msg::PrivateMessagesLoaded { with: user_clone, messages }
+                                }
+                                Err(e) => Msg::LogError(format!("Caricamento messaggi fallito: {}", e)),
+                            }
+                        }, |m| m);
+                    }
+                }
+            }
+            Msg::PrivateMessagesLoaded { with, messages } => {
+                self.private_chats.insert(with, messages);
+            }
+            Msg::MessageInputChanged(input) => {
+                self.current_message_input = input;
+            }
+            Msg::SendPrivateMessage { to } => {
+                if !self.current_message_input.trim().is_empty() {
+                    if let Some(token) = self.session_token.clone() {
+                        let cfg = ClientConfig::from_env();
+                        let host = match self.selected_host {
+                            HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                            HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                            HostType::Manual => self.manual_host.clone(),
+                        };
+                        let svc = chat_service.clone();
+                        let token_clone = token.clone();
+                        let to_clone = to.clone();
+                        let message_content = self.current_message_input.clone();
+                        let sender = self.username.clone();
+                        
+                        // Aggiungi immediatamente il messaggio alla cache locale (ottimistic update)
+                        let now = chrono::Utc::now();
+                        let chat_message = ChatMessage {
+                            sender: sender.clone(),
+                            content: message_content.clone(),
+                            timestamp: now.format("%H:%M").to_string(),
+                            sent_at: now.timestamp(),
+                        };
+                        
+                        self.private_chats.entry(to_clone.clone()).or_insert_with(Vec::new).push(chat_message);
+                        self.current_message_input.clear();
+                        
+                        return iced::Command::perform(async move {
+                            match crate::client::services::friend_service::FriendService::send_private_message(&svc, &host, &token_clone, &to_clone, &message_content).await {
+                                Ok(_) => Msg::LogInfo("Messaggio inviato".to_string()),
+                                Err(e) => Msg::LogError(format!("Invio messaggio fallito: {}", e)),
+                            }
+                        }, |m| m);
+                    }
+                }
             }
             Msg::OpenGroupChat(group_id, group_name) => {
                 self.app_state = AppState::GroupChat(group_id, group_name);
@@ -711,4 +792,40 @@ impl ChatAppState {
         }
         iced::Command::none()
     }
+}
+
+// Funzione helper per parsare i messaggi dal server
+fn parse_server_messages(raw_messages: &[String], other_username: &str) -> Vec<ChatMessage> {
+    raw_messages.iter().filter_map(|line| {
+        // Formato atteso: "[timestamp] sender_id: message"
+        if let Some(bracket_end) = line.find(']') {
+            if let Some(colon_pos) = line[bracket_end..].find(':') {
+                let timestamp_str = &line[1..bracket_end];
+                let sender_part = &line[bracket_end + 2..bracket_end + colon_pos];
+                let message_content = &line[bracket_end + colon_pos + 2..];
+                
+                // Converti timestamp Unix in formato leggibile
+                if let Ok(timestamp) = timestamp_str.parse::<i64>() {
+                    let datetime = chrono::DateTime::from_timestamp(timestamp, 0)?;
+                    let formatted_time = datetime.format("%H:%M").to_string();
+                    
+                    // Determina se il messaggio è nostro o dell'altro utente
+                    // Il server restituisce user_id, ma noi vogliamo username
+                    let sender = if sender_part.len() > 10 { // Probabilmente un UUID
+                        other_username.to_string() // Assumiamo sia dell'altro utente
+                    } else {
+                        sender_part.to_string()
+                    };
+                    
+                    return Some(ChatMessage {
+                        sender,
+                        content: message_content.to_string(),
+                        timestamp: formatted_time,
+                        sent_at: timestamp,
+                    });
+                }
+            }
+        }
+        None
+    }).collect()
 }
