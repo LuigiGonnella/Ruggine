@@ -185,10 +185,10 @@ impl ChatService {
     }
 
     /// Retrieve private messages with another user and return them parsed as Vec<String>.
-    pub async fn get_private_messages(&mut self, host: &str, session_token: &str, with: &str) -> anyhow::Result<Vec<String>> {
+    pub async fn get_private_messages(&mut self, host: &str, session_token: &str, with: &str) -> anyhow::Result<Vec<crate::client::models::app_state::ChatMessage>> {
         let cmd = format!("/get_private_messages {} {}", session_token, with);
         let resp = self.send_command(host, cmd).await?;
-        let msgs = message_parser::parse_messages(&resp).map_err(|e| anyhow::anyhow!(e))?;
+        let msgs = message_parser::parse_private_messages(&resp).map_err(|e| anyhow::anyhow!(e))?;
         Ok(msgs)
     }
 }

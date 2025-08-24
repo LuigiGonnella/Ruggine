@@ -19,6 +19,7 @@ impl Default for AppState {
 
 use crate::client::gui::views::registration::HostType;
 use crate::client::gui::views::logger::LogMessage;
+use tokio::sync::mpsc;
 use crate::server::config::ClientConfig;
 use std::collections::HashMap;
 
@@ -26,7 +27,8 @@ use std::collections::HashMap;
 pub struct ChatMessage {
     pub sender: String,
     pub content: String,
-    pub timestamp: String,
+    pub timestamp: i64, // Unix timestamp
+    pub formatted_time: String, // Human readable time
     pub sent_at: i64,
 }
 
@@ -50,6 +52,7 @@ pub struct ChatAppState {
     pub users_search_query: String,
     // Private chat state
     pub private_chats: HashMap<String, Vec<ChatMessage>>,
+    pub message_receiver: Option<mpsc::UnboundedReceiver<(String, Vec<ChatMessage>)>>,
     pub current_message_input: String,
 }
 
@@ -228,6 +231,10 @@ impl ChatAppState {
                 self.app_state = AppState::FriendRequests;
             }
             Msg::OpenMainActions => {
+                // Stop polling when leaving private chat
+                if matches!(self.app_state, AppState::PrivateChat(_)) {
+                    self.polling_active = false;
+                }
                 self.app_state = AppState::MainActions;
             }
             Msg::OpenUsersList { kind } => {
@@ -368,6 +375,8 @@ impl ChatAppState {
             // Quick test network actions
             Msg::SendGroupMessageTest => {
                 self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Invio messaggio di gruppo (test)...".to_string() });
+                                            // Trigger immediate refresh for the recipient
+                                            Message::TriggerImmediateRefresh { with: to.clone() }
                 // Perform async network call via shared ChatService
                 if let Some(token) = self.session_token.clone() {
                     let cfg = ClientConfig::from_env();
@@ -829,5 +838,4 @@ fn parse_server_messages(raw_messages: &[String], other_username: &str) -> Vec<C
             }
         }
         None
-    }).collect()
 }
