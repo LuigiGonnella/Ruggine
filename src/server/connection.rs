@@ -298,7 +298,7 @@ impl Server {
             "/get_private_messages" if args.len() == 2 => {
                 let session_token = args[0];
                 let other_username = args[1];
-                messages::get_private_messages(self.db.clone(), session_token, other_username).await
+                messages::get_private_messages(self.db.clone(), session_token, other_username, &self.config).await
             }
             "/delete_group_messages" if args.len() == 2 => {
                 let session_token = args[0];

@@ -53,4 +53,10 @@ pub enum Message {
     MyGroupInvites,
     JoinGroup { group_id: String },
     LeaveGroup { group_id: String },
+    // Private chat messages
+    StartPrivateChat(String), // username to start chat with
+    PrivateMessageChanged(String), // text input changed
+    SendPrivateMessage(String), // username to send message to
+    PrivateMessagesLoaded { with_user: String, messages: Vec<String> },
+    LoadPrivateMessages(String), // username to load messages from
 }

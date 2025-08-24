@@ -1,4 +1,5 @@
 use std::env;
+use crate::common::crypto::CryptoManager;
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -11,11 +12,36 @@ pub struct ServerConfig {
     pub session_expiry_days: u32,
     pub argon2_salt_length: u32,
     pub max_message_length: usize,
+    pub encryption_master_key: [u8; 32], // Master key for message encryption
 }
 
 impl ServerConfig {
     pub fn from_env() -> Self {
         dotenvy::dotenv().ok();
+        
+        // Generate or load master key
+        let encryption_master_key = if let Ok(key_hex) = env::var("ENCRYPTION_MASTER_KEY") {
+            // Try to load from environment (hex format)
+            if key_hex.len() == 64 { // 32 bytes = 64 hex chars
+                let mut key = [0u8; 32];
+                for i in 0..32 {
+                    let byte_str = &key_hex[i*2..(i*2)+2];
+                    key[i] = u8::from_str_radix(byte_str, 16).unwrap_or(0);
+                }
+                key
+            } else {
+                println!("[CRYPTO] Invalid master key in environment, generating new one");
+                CryptoManager::generate_master_key()
+            }
+        } else {
+            println!("[CRYPTO] No master key in environment, generating new one");
+            let key = CryptoManager::generate_master_key();
+            let key_hex: String = key.iter().map(|b| format!("{:02x}", b)).collect();
+            println!("[CRYPTO] Generated master key: {}", key_hex);
+            println!("[CRYPTO] Set ENCRYPTION_MASTER_KEY={} to persist this key", key_hex);
+            key
+        };
+        
         Self {
             host: env::var("SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
             port: env::var("SERVER_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(5000),
@@ -26,6 +52,7 @@ impl ServerConfig {
             session_expiry_days: env::var("SESSION_EXPIRY_DAYS").ok().and_then(|v| v.parse().ok()).unwrap_or(7),
             argon2_salt_length: env::var("ARGON2_SALT_LENGTH").ok().and_then(|v| v.parse().ok()).unwrap_or(16),
             max_message_length: env::var("MAX_MESSAGE_LENGTH").ok().and_then(|v| v.parse().ok()).unwrap_or(2048),
+            encryption_master_key,
         }
     }
 }

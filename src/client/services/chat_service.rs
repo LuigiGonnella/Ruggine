@@ -1,15 +1,21 @@
 use tokio::net::TcpStream;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, Duration, timeout};
 use std::sync::Arc;
 use crate::client::services::message_parser;
+
+#[derive(Debug)]
+enum CommandType {
+    SingleLine(String),
+    MultiLine(String),
+}
 
 #[derive(Default)]
 pub struct ChatService {
     /// Sender used by the app to request the background task to send a command and
-    /// wait for a single-line response.
-    pub tx: Option<mpsc::UnboundedSender<(String, oneshot::Sender<String>)>>,
+    /// wait for a response.
+    pub tx: Option<mpsc::UnboundedSender<(CommandType, oneshot::Sender<String>)>>,
     /// Keep the background task handle so it stays alive for the lifetime of the service
     pub _bg: Option<tokio::task::JoinHandle<()>>,
 }
@@ -31,7 +37,7 @@ impl ChatService {
         let mut reader = BufReader::new(reader);
         let mut writer = BufWriter::new(writer);
 
-        let (tx, mut rx) = mpsc::unbounded_channel::<(String, oneshot::Sender<String>)>();
+        let (tx, mut rx) = mpsc::unbounded_channel::<(CommandType, oneshot::Sender<String>)>();
 
         // Spawn background task that processes outgoing requests sequentially.
         // The task will transparently reconnect and resend the current command
@@ -41,9 +47,14 @@ impl ChatService {
             // current reader/writer are in scope and may be replaced on reconnect
             loop {
                 // Wait for the next outgoing command. If channel closed, exit cleanly.
-                let (cmd, resp_tx) = match rx.recv().await {
+                let (cmd_type, resp_tx) = match rx.recv().await {
                     Some(pair) => pair,
                     None => break,
+                };
+
+                let (cmd, is_multiline) = match cmd_type {
+                    CommandType::SingleLine(cmd) => (cmd, false),
+                    CommandType::MultiLine(cmd) => (cmd, true),
                 };
 
                 // Log outgoing
@@ -53,7 +64,7 @@ impl ChatService {
                     println!("[CLIENT:SVC] Sending command: {}", cmd);
                 }
 
-                // Attempt to send this command and receive a single-line response.
+                // Attempt to send this command and receive a response.
                 // If the connection is dropped at any point, try to reconnect and
                 // then resend the same command. This loop keeps retrying until
                 // we either get a response or the response sender is dropped.
@@ -109,43 +120,120 @@ impl ChatService {
                         }
                     }
 
-                    // Try to read a single-line response.
-                    server_line.clear();
-                    match reader.read_line(&mut server_line).await {
-                        Ok(0) => {
-                            // Connection closed by peer. Reconnect and retry sending the same command.
-                            eprintln!("[CLIENT:SVC] server closed connection, reconnecting...");
-                            match TcpStream::connect(&host).await {
-                                Ok(s) => {
-                                    let (r, w) = s.into_split();
-                                    reader = BufReader::new(r);
-                                    writer = BufWriter::new(w);
-                                    // retry send/receive loop
-                                    continue;
+                    // Try to read the response based on type
+                    if is_multiline {
+                        // For multiline responses, read all available lines
+                        let mut response = String::new();
+                        server_line.clear();
+                        
+                        // Read the first line (should be "OK: Messages:")
+                        match reader.read_line(&mut server_line).await {
+                            Ok(0) => {
+                                // Connection closed by peer. Reconnect and retry.
+                                eprintln!("[CLIENT:SVC] server closed connection, reconnecting...");
+                                match TcpStream::connect(&host).await {
+                                    Ok(s) => {
+                                        let (r, w) = s.into_split();
+                                        reader = BufReader::new(r);
+                                        writer = BufWriter::new(w);
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        let _ = resp_tx.send(format!("ERR: reconnect failed: {}", e));
+                                        break;
+                                    }
                                 }
-                                Err(e) => {
-                                    let _ = resp_tx.send(format!("ERR: reconnect failed: {}", e));
-                                    break;
+                            }
+                            Ok(_) => {
+                                response.push_str(&server_line);
+                                
+                                // For get_private_messages, read all lines until timeout or empty line
+                                loop {
+                                    server_line.clear();
+                                    
+                                    // Use timeout to avoid blocking forever
+                                    match timeout(Duration::from_millis(100), reader.read_line(&mut server_line)).await {
+                                        Ok(Ok(0)) => {
+                                            // Connection closed
+                                            break;
+                                        }
+                                        Ok(Ok(_)) => {
+                                            let trimmed = server_line.trim();
+                                            if trimmed.is_empty() {
+                                                // Empty line indicates end of response
+                                                break;
+                                            }
+                                            response.push_str(&server_line);
+                                        }
+                                        Ok(Err(e)) => {
+                                            eprintln!("[CLIENT:SVC] read failed during multiline: {}", e);
+                                            break;
+                                        }
+                                        Err(_) => {
+                                            // Timeout - assume end of response
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                let _ = resp_tx.send(response.trim().to_string());
+                                break;
+                            }
+                            Err(e) => {
+                                eprintln!("[CLIENT:SVC] read failed: {}, reconnecting...", e);
+                                match TcpStream::connect(&host).await {
+                                    Ok(s) => {
+                                        let (r, w) = s.into_split();
+                                        reader = BufReader::new(r);
+                                        writer = BufWriter::new(w);
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        let _ = resp_tx.send(format!("ERR: reconnect failed: {}", e));
+                                        break;
+                                    }
                                 }
                             }
                         }
-                        Ok(_) => {
-                            let resp = server_line.trim().to_string();
-                            let _ = resp_tx.send(resp);
-                            break;
-                        }
-                        Err(e) => {
-                            eprintln!("[CLIENT:SVC] read failed: {}, reconnecting...", e);
-                            match TcpStream::connect(&host).await {
-                                Ok(s) => {
-                                    let (r, w) = s.into_split();
-                                    reader = BufReader::new(r);
-                                    writer = BufWriter::new(w);
-                                    continue;
+                    } else {
+                        // Single line response (existing logic)
+                        server_line.clear();
+                        match reader.read_line(&mut server_line).await {
+                            Ok(0) => {
+                                // Connection closed by peer. Reconnect and retry sending the same command.
+                                eprintln!("[CLIENT:SVC] server closed connection, reconnecting...");
+                                match TcpStream::connect(&host).await {
+                                    Ok(s) => {
+                                        let (r, w) = s.into_split();
+                                        reader = BufReader::new(r);
+                                        writer = BufWriter::new(w);
+                                        // retry send/receive loop
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        let _ = resp_tx.send(format!("ERR: reconnect failed: {}", e));
+                                        break;
+                                    }
                                 }
-                                Err(e) => {
-                                    let _ = resp_tx.send(format!("ERR: reconnect failed: {}", e));
-                                    break;
+                            }
+                            Ok(_) => {
+                                let resp = server_line.trim().to_string();
+                                let _ = resp_tx.send(resp);
+                                break;
+                            }
+                            Err(e) => {
+                                eprintln!("[CLIENT:SVC] read failed: {}, reconnecting...", e);
+                                match TcpStream::connect(&host).await {
+                                    Ok(s) => {
+                                        let (r, w) = s.into_split();
+                                        reader = BufReader::new(r);
+                                        writer = BufWriter::new(w);
+                                        continue;
+                                    }
+                                    Err(e) => {
+                                        let _ = resp_tx.send(format!("ERR: reconnect failed: {}", e));
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -166,7 +254,21 @@ impl ChatService {
         self.ensure_connected(host).await?;
         if let Some(tx) = &self.tx {
             let (resp_tx, resp_rx) = oneshot::channel();
-            tx.send((cmd, resp_tx)).map_err(|_| anyhow::anyhow!("send failed: background task ended"))?;
+            tx.send((CommandType::SingleLine(cmd), resp_tx)).map_err(|_| anyhow::anyhow!("send failed: background task ended"))?;
+            let resp = resp_rx.await.map_err(|_| anyhow::anyhow!("response channel closed before response"))?;
+            Ok(resp)
+        } else {
+            Err(anyhow::anyhow!("not connected"))
+        }
+    }
+
+    /// Send a command and wait for the multi-line response from the server.
+    pub async fn send_multiline_command(&mut self, host: &str, cmd: String) -> anyhow::Result<String> {
+        // Ensure background task is running; it will manage reconnects and resends.
+        self.ensure_connected(host).await?;
+        if let Some(tx) = &self.tx {
+            let (resp_tx, resp_rx) = oneshot::channel();
+            tx.send((CommandType::MultiLine(cmd), resp_tx)).map_err(|_| anyhow::anyhow!("send failed: background task ended"))?;
             let resp = resp_rx.await.map_err(|_| anyhow::anyhow!("response channel closed before response"))?;
             Ok(resp)
         } else {
@@ -187,8 +289,10 @@ impl ChatService {
     /// Retrieve private messages with another user and return them parsed as Vec<String>.
     pub async fn get_private_messages(&mut self, host: &str, session_token: &str, with: &str) -> anyhow::Result<Vec<String>> {
         let cmd = format!("/get_private_messages {} {}", session_token, with);
-        let resp = self.send_command(host, cmd).await?;
+        let resp = self.send_multiline_command(host, cmd).await?;
+        println!("[CLIENT:SVC] Raw response from server: {:?}", resp);
         let msgs = message_parser::parse_messages(&resp).map_err(|e| anyhow::anyhow!(e))?;
+        println!("[CLIENT:SVC] Parsed messages: {:?}", msgs);
         Ok(msgs)
     }
 }
