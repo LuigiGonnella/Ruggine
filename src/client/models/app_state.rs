@@ -369,6 +369,24 @@ impl ChatAppState {
                     }
                 }
             }
+            Msg::NewMessagesReceived { with, messages } => {
+                // Update the chat cache with new messages
+                self.private_chats.insert(with.clone(), messages.clone());
+                
+                // If this is for the currently open chat, continue fast polling
+                if let AppState::PrivateChat(current_chat) = &self.app_state {
+                    if current_chat == &with {
+                        return iced::Command::perform(
+                            async move {
+                                tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+                                Msg::StartMessagePolling { with: with.clone() }
+                            },
+                            |msg| msg,
+                        );
+                    }
+                }
+                iced::Command::none()
+            }
             Msg::OpenGroupChat(group_id, group_name) => {
                 self.app_state = AppState::GroupChat(group_id, group_name);
             }
@@ -838,4 +856,5 @@ fn parse_server_messages(raw_messages: &[String], other_username: &str) -> Vec<C
             }
         }
         None
+    }).collect()
 }
