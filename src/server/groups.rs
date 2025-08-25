@@ -41,6 +41,73 @@ pub async fn create_group(db: Arc<Database>, user_id: &str, group_name: &str) ->
     }
 }
 
+pub async fn create_group_with_participants(db: Arc<Database>, user_id: &str, group_name: &str, participants: Option<&str>) -> String {
+    println!("[GROUPS] Create group '{}' by user {} with participants: {:?}", group_name, user_id, participants);
+    let group_id = uuid::Uuid::new_v4().to_string();
+    let created_at = chrono::Utc::now().timestamp();
+    let tx = db.pool.begin().await;
+    match tx {
+        Ok(mut tx) => {
+            // Create group
+            let res = sqlx::query("INSERT INTO groups (id, name, created_by, created_at) VALUES (?, ?, ?, ?)")
+                .bind(&group_id)
+                .bind(group_name)
+                .bind(user_id)
+                .bind(created_at)
+                .execute(&mut *tx)
+                .await;
+            if let Err(e) = res {
+                println!("[GROUPS] Error creating group: {}", e);
+                return format!("ERR: Could not create group: {}", e);
+            }
+            
+            // Add creator as member
+            let res2 = sqlx::query("INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)")
+                .bind(&group_id)
+                .bind(user_id)
+                .bind(created_at)
+                .execute(&mut *tx)
+                .await;
+            if let Err(e) = res2 {
+                println!("[GROUPS] Error adding creator as member: {}", e);
+                return format!("ERR: Could not add creator as member: {}", e);
+            }
+            
+            // Add participants if provided
+            if let Some(participants_str) = participants {
+                let participant_usernames: Vec<&str> = participants_str.split(',').collect();
+                for username in participant_usernames {
+                    let username = username.trim();
+                    if !username.is_empty() && username != user_id {
+                        // Get user_id from username
+                        if let Ok(Some(row)) = sqlx::query("SELECT id FROM users WHERE username = ?")
+                            .bind(username)
+                            .fetch_optional(&mut *tx)
+                            .await
+                        {
+                            let participant_id: String = row.get("id");
+                            let _ = sqlx::query("INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)")
+                                .bind(&group_id)
+                                .bind(&participant_id)
+                                .bind(created_at)
+                                .execute(&mut *tx)
+                                .await;
+                            println!("[GROUPS] Added participant {} to group {}", username, group_id);
+                        }
+                    }
+                }
+            }
+            
+            tx.commit().await.ok();
+            println!("[GROUPS] Group '{}' created with id {}", group_name, group_id);
+            format!("OK: Group '{}' created with ID: {}", group_name, group_id)
+        }
+        Err(e) => {
+            println!("[GROUPS] Error starting transaction: {}", e);
+            format!("ERR: Could not create group: {}", e)
+        }
+    }
+}
 pub async fn my_groups(db: Arc<Database>, user_id: &str) -> String {
     println!("[GROUPS] List groups for user {}", user_id);
     let rows = sqlx::query("SELECT g.id, g.name FROM groups g JOIN group_members m ON g.id = m.group_id WHERE m.user_id = ?")
@@ -59,21 +126,32 @@ pub async fn my_groups(db: Arc<Database>, user_id: &str) -> String {
     }
 }
 
-pub async fn invite(db: Arc<Database>, from_user: &str, to_user: &str, group_name: &str) -> String {
-    println!("[GROUPS] Invite {} to group '{}' by {}", to_user, group_name, from_user);
-    // Trova group_id
-    let group_row = sqlx::query("SELECT id FROM groups WHERE name = ?")
-        .bind(group_name)
+pub async fn invite_user_to_group(db: Arc<Database>, from_user_id: &str, to_username: &str, group_id: &str) -> String {
+    println!("[GROUPS] Invite {} to group '{}' by {}", to_username, group_id, from_user_id);
+    
+    // Verify group exists
+    let group_row = sqlx::query("SELECT id FROM groups WHERE id = ?")
+        .bind(group_id)
         .fetch_optional(&db.pool)
         .await;
-    let group_id = match group_row {
+    if group_row.is_err() || group_row.unwrap().is_none() {
+        return "ERR: Group not found".to_string();
+    }
+    
+    // Get user_id from username
+    let user_row = sqlx::query("SELECT id FROM users WHERE username = ?")
+        .bind(to_username)
+        .fetch_optional(&db.pool)
+        .await;
+    let to_user_id = match user_row {
         Ok(Some(row)) => row.get::<String,_>("id"),
         _ => return "ERR: Group not found".to_string(),
     };
-    // Verifica che from_user sia membro
+    
+    // Verify that from_user is member of the group
     let is_member = sqlx::query("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?")
         .bind(&group_id)
-        .bind(from_user)
+        .bind(from_user_id)
         .fetch_optional(&db.pool)
         .await
         .ok()
@@ -82,23 +160,36 @@ pub async fn invite(db: Arc<Database>, from_user: &str, to_user: &str, group_nam
     if !is_member {
         return "ERR: Only group members can invite".to_string();
     }
-    // Crea invito
-    let created_at = chrono::Utc::now().timestamp();
-    let res = sqlx::query("INSERT INTO group_invites (group_id, invited_user_id, invited_by, created_at, status) VALUES (?, ?, ?, ?, 'pending')")
+    
+    // Check if user is already a member
+    let already_member = sqlx::query("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?")
         .bind(&group_id)
-        .bind(to_user)
-        .bind(from_user)
+        .bind(&to_user_id)
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    if already_member {
+        return "ERR: User is already a member of this group".to_string();
+    }
+    
+    // Add user directly to group (simplified - no invite system for now)
+    let created_at = chrono::Utc::now().timestamp();
+    let res = sqlx::query("INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)")
+        .bind(&group_id)
+        .bind(&to_user_id)
         .bind(created_at)
         .execute(&db.pool)
         .await;
     match res {
         Ok(_) => {
-            println!("[GROUPS] Invite sent to {} for group {}", to_user, group_id);
-            "OK: Invite sent".to_string()
+            println!("[GROUPS] User {} added to group {}", to_username, group_id);
+            format!("OK: {} added to group successfully", to_username)
         }
         Err(e) => {
-            println!("[GROUPS] Error sending invite: {}", e);
-            format!("ERR: Could not send invite: {}", e)
+            println!("[GROUPS] Error adding user to group: {}", e);
+            format!("ERR: Could not add user to group: {}", e)
         }
     }
 }

@@ -80,6 +80,9 @@ pub enum Message {
     CreateGroupInputChanged(String),
     CreateGroupSubmit,
     GroupCreated { group_id: String, group_name: String },
+    // Participant selection for group creation
+    ToggleParticipant(String),
+    RemoveParticipant(String),
     MyGroupsLoaded { groups: Vec<(String, String, usize)> }, // (id, name, member_count)
     InviteUserToGroup { group_id: String, username: String },
     InviteToGroupResult { success: bool, message: String },

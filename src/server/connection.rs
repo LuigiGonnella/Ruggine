@@ -213,10 +213,12 @@ impl Server {
                 let exclude = None;
                 users::list_all(self.db.clone(), exclude).await
             }
-            "/create_group" if args.len() == 2 => {
+            "/create_group" if args.len() >= 2 => {
                 let session_token = args[0];
+                let group_name = args[1];
+                let participants = if args.len() > 2 { Some(args[2]) } else { None };
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
-                    groups::create_group(self.db.clone(), &uid, args[1]).await
+                    groups::create_group_with_participants(self.db.clone(), &uid, group_name, participants).await
                 } else {
                     "ERR: Invalid or expired session".to_string()
                 }
@@ -229,10 +231,12 @@ impl Server {
                     "ERR: Invalid or expired session".to_string()
                 }
             }
-            "/invite_to_group" if args.len() == 3 => {
+            "/invite" if args.len() == 3 => {
                 let session_token = args[0];
+                let username = args[1];
+                let group_id = args[2];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
-                    groups::invite(self.db.clone(), &uid, args[1], args[2]).await
+                    groups::invite_user_to_group(self.db.clone(), &uid, username, group_id).await
                 } else {
                     "ERR: Invalid or expired session".to_string()
                 }

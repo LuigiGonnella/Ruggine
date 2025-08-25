@@ -61,6 +61,7 @@ pub struct ChatAppState {
     pub loading_group_chats: std::collections::HashSet<String>,
     pub group_polling_active: bool,
     pub create_group_name: String,
+    pub selected_participants: std::collections::HashSet<String>,
     pub my_groups: Vec<(String, String, usize)>, // (id, name, member_count)
     pub loading_groups: bool,
 }
@@ -256,6 +257,24 @@ impl ChatAppState {
             Message::OpenCreateGroup => {
                 self.app_state = AppState::CreateGroup;
                 self.create_group_name.clear();
+                self.selected_participants.clear();
+                self.users_search_query.clear();
+                self.users_search_results.clear();
+                
+                // Auto-load all users for participant selection
+                let svc = chat_service.clone();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                
+                return Command::perform(
+                    async move {
+                        match UsersService::list_all(&svc, &host).await {
+                            Ok(users) => Message::UsersListLoaded { kind: "CreateGroup".to_string(), list: users },
+                            Err(_) => Message::UsersListLoaded { kind: "CreateGroup".to_string(), list: vec![] },
+                        }
+                    },
+                    |msg| msg,
+                );
             }
             Message::OpenMyGroups => {
                 self.app_state = AppState::MyGroups;
@@ -324,12 +343,23 @@ impl ChatAppState {
             Message::CreateGroupInputChanged(name) => {
                 self.create_group_name = name;
             }
+            Message::ToggleParticipant(username) => {
+                if self.selected_participants.contains(&username) {
+                    self.selected_participants.remove(&username);
+                } else {
+                    self.selected_participants.insert(username);
+                }
+            }
+            Message::RemoveParticipant(username) => {
+                self.selected_participants.remove(&username);
+            }
             Message::CreateGroupSubmit => {
-                if !self.create_group_name.trim().is_empty() {
+                if !self.create_group_name.trim().is_empty() && !self.selected_participants.is_empty() {
                     if let Some(token) = &self.session_token {
                         let svc = chat_service.clone();
                         let token_clone = token.clone();
                         let name_clone = self.create_group_name.trim().to_string();
+                        let participants = self.selected_participants.clone();
                         let cfg = crate::server::config::ClientConfig::from_env();
                         let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                         
@@ -338,7 +368,8 @@ impl ChatAppState {
                         return Command::perform(
                             async move {
                                 let mut guard = svc.lock().await;
-                                match guard.send_command(&host, format!("/create_group {} {}", token_clone, name_clone)).await {
+                                let participants_str = participants.into_iter().collect::<Vec<_>>().join(",");
+                                match guard.send_command(&host, format!("/create_group {} {} {}", token_clone, name_clone, participants_str)).await {
                                     Ok(response) => {
                                         if response.starts_with("OK:") {
                                             // Extract group ID from response if available, otherwise use name as ID

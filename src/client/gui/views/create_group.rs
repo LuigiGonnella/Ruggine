@@ -1,5 +1,5 @@
 use iced::{Element, Length, Alignment, Color, Font};
-use iced::widget::{Column, Row, Text, TextInput, Button, Container, Space};
+use iced::widget::{Column, Row, Text, TextInput, Button, Container, Space, Scrollable, Checkbox};
 use crate::client::models::messages::Message;
 use crate::client::models::app_state::ChatAppState;
 use crate::client::gui::views::logger::logger_view;
@@ -88,6 +88,23 @@ fn input_appearance(_: &iced::Theme) -> iced::widget::container::Appearance {
     }
 }
 
+fn user_item_appearance(_: &iced::Theme) -> iced::widget::container::Appearance {
+    iced::widget::container::Appearance {
+        background: Some(iced::Background::Color(CARD_BG)),
+        text_color: Some(TEXT_PRIMARY),
+        border: iced::Border {
+            width: 1.0,
+            color: Color::from_rgb(0.2, 0.2, 0.3),
+            radius: 12.0.into(),
+        },
+        shadow: iced::Shadow {
+            offset: iced::Vector::new(0.0, 2.0),
+            blur_radius: 6.0,
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
+        },
+    }
+}
+
 pub fn view(state: &ChatAppState) -> Element<Message> {
     // Top logger bar
     let logger_bar = if !state.logger.is_empty() {
@@ -126,7 +143,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
                 .push(Text::new("➕").font(EMOJI_FONT).size(24))
                 .push(Text::new("Create New Group").font(BOLD_FONT).size(24).style(TEXT_PRIMARY))
         )
-        .push(Text::new("Create a group and invite friends").size(14).style(TEXT_SECONDARY));
+        .push(Text::new("Create a group and select participants").size(14).style(TEXT_SECONDARY));
 
     let header_row = Row::new()
         .spacing(16)
@@ -142,7 +159,8 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
 
     // Group name input validation
     let group_name_valid = !state.create_group_name.trim().is_empty() && state.create_group_name.len() >= 3;
-    let submit_enabled = group_name_valid && !state.loading;
+    let has_participants = !state.selected_participants.is_empty();
+    let submit_enabled = group_name_valid && has_participants && !state.loading;
 
     // Main form card
     let group_name_field = Column::new()
@@ -158,7 +176,6 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
             Container::new(
                 TextInput::new("Enter group name", &state.create_group_name)
                     .on_input(Message::CreateGroupInputChanged)
-                    .on_submit(if submit_enabled { Message::CreateGroupSubmit } else { Message::None })
                     .width(Length::Fill)
                     .padding(12)
                     .size(14)
@@ -166,19 +183,169 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
             .style(iced::theme::Container::Custom(Box::new(input_appearance)))
         );
 
-    // Validation indicator
-    let validation_indicator = Row::new()
+    // Search field for participants
+    let search_field = Column::new()
         .spacing(8)
-        .align_items(Alignment::Center)
         .push(
-            Text::new(if group_name_valid { "✅" } else { "❌" })
-                .font(EMOJI_FONT)
-                .size(12)
+            Row::new()
+                .spacing(8)
+                .align_items(Alignment::Center)
+                .push(Text::new("🔍").font(EMOJI_FONT).size(16).style(TEXT_SECONDARY))
+                .push(Text::new("Search Users").size(14).style(TEXT_SECONDARY))
         )
         .push(
-            Text::new("Group name (3+ characters)")
-                .size(12)
-                .style(if group_name_valid { ACCENT_COLOR } else { TEXT_SECONDARY })
+            Container::new(
+                TextInput::new("Search username...", &state.users_search_query)
+                    .on_input(Message::UsersSearchQueryChanged)
+                    .on_submit(Message::UsersSearch)
+                    .width(Length::Fill)
+                    .padding(12)
+                    .size(14)
+            )
+            .style(iced::theme::Container::Custom(Box::new(input_appearance)))
+        );
+
+    // Selected participants display
+    let selected_section = if state.selected_participants.is_empty() {
+        Column::new()
+            .spacing(8)
+            .push(
+                Row::new()
+                    .spacing(8)
+                    .align_items(Alignment::Center)
+                    .push(Text::new("👤").font(EMOJI_FONT).size(16).style(TEXT_SECONDARY))
+                    .push(Text::new("Selected Participants").size(14).style(TEXT_SECONDARY))
+            )
+            .push(
+                Container::new(
+                    Text::new("No participants selected yet")
+                        .size(12)
+                        .style(TEXT_SECONDARY)
+                )
+                .padding(12)
+                .width(Length::Fill)
+                .style(iced::theme::Container::Custom(Box::new(input_appearance)))
+            )
+    } else {
+        let mut selected_row = Row::new().spacing(8);
+        for username in &state.selected_participants {
+            selected_row = selected_row.push(
+                Container::new(
+                    Row::new()
+                        .spacing(4)
+                        .align_items(Alignment::Center)
+                        .push(Text::new(username).size(12).style(TEXT_PRIMARY))
+                        .push(
+                            Button::new(Text::new("×").size(12))
+                                .on_press(Message::RemoveParticipant(username.clone()))
+                                .style(iced::theme::Button::Destructive)
+                                .padding(2)
+                        )
+                )
+                .padding([4, 8])
+                .style(iced::theme::Container::Custom(Box::new(|_: &iced::Theme| {
+                    iced::widget::container::Appearance {
+                        background: Some(iced::Background::Color(ACCENT_COLOR)),
+                        border: iced::Border {
+                            radius: 12.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }
+                })))
+            );
+        }
+
+        Column::new()
+            .spacing(8)
+            .push(
+                Row::new()
+                    .spacing(8)
+                    .align_items(Alignment::Center)
+                    .push(Text::new("👤").font(EMOJI_FONT).size(16).style(TEXT_SECONDARY))
+                    .push(Text::new(format!("Selected Participants ({})", state.selected_participants.len())).size(14).style(TEXT_SECONDARY))
+            )
+            .push(
+                Container::new(selected_row)
+                    .padding(12)
+                    .width(Length::Fill)
+                    .style(iced::theme::Container::Custom(Box::new(input_appearance)))
+            )
+    };
+
+    // Available users list
+    let mut users_list = Column::new().spacing(8);
+    for username in &state.users_search_results {
+        if username != &state.username && !state.selected_participants.contains(username) {
+            let user_item = Container::new(
+                Row::new()
+                    .spacing(12)
+                    .align_items(Alignment::Center)
+                    .push(Text::new("👤").font(EMOJI_FONT).size(16))
+                    .push(Text::new(username).size(14).style(TEXT_PRIMARY))
+                    .push(Space::new(Length::Fill, Length::Fixed(0.0)))
+                    .push(
+                        Checkbox::new("", state.selected_participants.contains(username))
+                            .on_toggle(move |_| Message::ToggleParticipant(username.clone()))
+                    )
+            )
+            .padding(12)
+            .width(Length::Fill)
+            .style(iced::theme::Container::Custom(Box::new(user_item_appearance)));
+            
+            users_list = users_list.push(user_item);
+        }
+    }
+
+    let users_section = Column::new()
+        .spacing(8)
+        .push(
+            Row::new()
+                .spacing(8)
+                .align_items(Alignment::Center)
+                .push(Text::new("📋").font(EMOJI_FONT).size(16).style(TEXT_SECONDARY))
+                .push(Text::new("Available Users").size(14).style(TEXT_SECONDARY))
+        )
+        .push(
+            Container::new(
+                Scrollable::new(users_list)
+                    .height(Length::Fixed(200.0))
+            )
+            .width(Length::Fill)
+        );
+
+    // Validation indicators
+    let validation_indicators = Column::new()
+        .spacing(4)
+        .push(
+            Row::new()
+                .spacing(8)
+                .align_items(Alignment::Center)
+                .push(
+                    Text::new(if group_name_valid { "✅" } else { "❌" })
+                        .font(EMOJI_FONT)
+                        .size(12)
+                )
+                .push(
+                    Text::new("Group name (3+ characters)")
+                        .size(12)
+                        .style(if group_name_valid { ACCENT_COLOR } else { TEXT_SECONDARY })
+                )
+        )
+        .push(
+            Row::new()
+                .spacing(8)
+                .align_items(Alignment::Center)
+                .push(
+                    Text::new(if has_participants { "✅" } else { "❌" })
+                        .font(EMOJI_FONT)
+                        .size(12)
+                )
+                .push(
+                    Text::new("At least one participant selected")
+                        .size(12)
+                        .style(if has_participants { ACCENT_COLOR } else { TEXT_SECONDARY })
+                )
         );
 
     // Submit button
@@ -255,30 +422,21 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
 
     // Main card content
     let card_content = Column::new()
-        .width(Length::Fixed(420.0))
-        .spacing(24)
+        .width(Length::Fixed(500.0))
+        .spacing(20)
         .padding(32)
-        .align_items(Alignment::Center)
-        .push(
-            Column::new()
-                .spacing(8)
-                .align_items(Alignment::Center)
-                .push(Text::new("👥").font(EMOJI_FONT).size(48).style(ACCENT_COLOR))
-                .push(Text::new("New Group").font(BOLD_FONT).size(24).style(TEXT_PRIMARY))
-                .push(Text::new("Create a group to chat with multiple friends").size(14).style(TEXT_SECONDARY))
-        )
-        .push(Space::new(Length::Fill, Length::Fixed(16.0)))
         .push(group_name_field)
+        .push(search_field)
+        .push(selected_section)
+        .push(users_section)
+        .push(validation_indicators)
         .push(Space::new(Length::Fill, Length::Fixed(8.0)))
-        .push(validation_indicator)
-        .push(Space::new(Length::Fill, Length::Fixed(16.0)))
         .push(submit_button)
         .push(loading_element);
 
     let card = Container::new(card_content)
         .style(iced::theme::Container::Custom(Box::new(card_appearance)))
-        .center_x()
-        .center_y();
+        .center_x();
 
     // Main layout
     let main_content = Column::new()
@@ -288,11 +446,14 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .push(header)
         .push(Space::new(Length::Fill, Length::Fixed(16.0)))
         .push(
-            Container::new(card)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center_x()
-                .center_y()
+            Scrollable::new(
+                Container::new(card)
+                    .width(Length::Fill)
+                    .center_x()
+                    .padding([0, 24])
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
         );
 
     Container::new(main_content)
