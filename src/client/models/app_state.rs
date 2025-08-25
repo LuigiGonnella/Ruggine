@@ -22,9 +22,6 @@ use crate::client::gui::views::registration::HostType;
 use crate::client::gui::views::logger::LogMessage;
 
 use crate::server::config::ClientConfig;
-<<<<<<< HEAD
-use chrono::{DateTime, Local};
-=======
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -35,7 +32,6 @@ pub struct ChatMessage {
     pub formatted_time: String, // Human readable time
     pub sent_at: i64,
 }
->>>>>>> b08dc3b595f658f02b31de5ddc0ef5aa6b30a912
 
 #[derive(Debug, Clone, Default)]
 pub struct ChatAppState {
@@ -57,25 +53,11 @@ pub struct ChatAppState {
     pub users_search_results: Vec<String>,
     pub users_search_query: String,
     // Private chat state
-<<<<<<< HEAD
-    pub current_private_chat_user: Option<String>,
-    pub private_message_input: String,
-    pub private_messages: Vec<PrivateMessage>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PrivateMessage {
-    pub from_user: String,
-    pub to_user: String,
-    pub content: String,
-    pub timestamp: String,
-    pub is_sent_by_me: bool,
-=======
     pub private_chats: HashMap<String, Vec<ChatMessage>>,
     // pub message_receiver: Option<mpsc::UnboundedReceiver<(String, Vec<ChatMessage>)>>,
     pub current_message_input: String,
-    pub polling_active: bool, // Stato polling per chat privata
->>>>>>> b08dc3b595f658f02b31de5ddc0ef5aa6b30a912
+    pub polling_active: bool, // true se sei in chat
+    pub polling_chat_with: Option<String>, // username della chat attiva
 }
 
 impl ChatAppState {
@@ -140,13 +122,10 @@ impl ChatAppState {
                         }
                     }
                     
-                    // Set the current user UUID based on username (temporary hardcoded solution)
-                    self.current_user_uuid = match self.username.as_str() {
-                        "Luigi13" => Some("6e991eec-426b-4cab-b2b7-b511f11bdc61".to_string()),
-                        "Dory" => Some("862758e3-2edb-447f-a53c-058e00d095a2".to_string()),
-                        _ => None, // Unknown user
-                    };
-                    println!("[DEBUG] Set current_user_uuid for {}: {:?}", self.username, self.current_user_uuid);
+                    // Non serve settare un UUID: usa direttamente lo username/id associato
+                    self.current_user_uuid = None;
+                    // Se serve un UUID per operazioni specifiche, valorizzalo qui
+                    // println!("[DEBUG] Set current_user_uuid for {}: {:?}", self.username, self.current_user_uuid);
                     
                     // Push a single success log (replace previous) and switch to main state
                     let action = if self.is_login { "Login" } else { "Registrazione" };
@@ -326,33 +305,40 @@ impl ChatAppState {
                 self.users_search_results = results;
             }
             Msg::OpenPrivateChat(username) => {
-                // Carica i messaggi per questa chat quando si apre
+                // Attiva polling real-time e ricarica la history ogni volta che si entra in chat
                 let username_clone = username.clone();
-                self.app_state = AppState::PrivateChat(username);
-                
-                // Se non abbiamo già i messaggi in cache, caricali
-                if !self.private_chats.contains_key(&username_clone) {
-                    if let Some(token) = self.session_token.clone() {
-                        let cfg = ClientConfig::from_env();
-                        let host = match self.selected_host {
-                            HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                            HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                            HostType::Manual => self.manual_host.clone(),
-                        };
+                self.app_state = AppState::PrivateChat(username_clone.clone());
+                // Do not enable polling here; emit StartMessagePolling and let the app-level handler
+                // start the polling so it can manage async commands correctly.
+                self.polling_active = false;
+                self.polling_chat_with = Some(username_clone.clone());
+
+                // Carica sempre la history all'ingresso
+                if let Some(token) = self.session_token.clone() {
+                    let cfg = ClientConfig::from_env();
+                    let host = match self.selected_host {
+                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
+                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
+                        HostType::Manual => self.manual_host.clone(),
+                    };
                         let svc = chat_service.clone();
                         let token_clone = token.clone();
                         let user_clone = username_clone.clone();
-                        return iced::Command::perform(async move {
+                        // Command to load history on entry
+                        let cmd_history = iced::Command::perform(async move {
                             match crate::client::services::friend_service::FriendService::get_private_messages(&svc, &host, &token_clone, &user_clone).await {
                                 Ok(raw_messages) => {
                                     // Parsa i messaggi dal formato server
                                     let messages = parse_server_messages(&raw_messages, &user_clone);
-                                    Msg::PrivateMessagesLoaded { with: user_clone, messages }
+                                    Msg::PrivateMessagesLoaded { with: user_clone.clone(), messages }
                                 }
                                 Err(e) => Msg::LogError(format!("Caricamento messaggi fallito: {}", e)),
                             }
                         }, |m| m);
-                    }
+                        // Command to start polling (handled at app level)
+                        let start_with = username_clone.clone();
+                        let cmd_start_polling = iced::Command::perform(async move { () }, move |_| Msg::StartMessagePolling { with: start_with.clone() });
+                        return iced::Command::batch(vec![cmd_history, cmd_start_polling]);
                 }
             }
             Msg::PrivateMessagesLoaded { with, messages } => {
@@ -809,164 +795,10 @@ impl ChatAppState {
                     }, |m| m);
                 }
             }
-<<<<<<< HEAD
-            // Private chat messages
-            Msg::StartPrivateChat(username) => {
-                self.app_state = AppState::PrivateChat(username.clone());
-                self.current_private_chat_user = Some(username.clone());
-                self.private_messages.clear();
-                self.private_message_input.clear();
-                // Load existing messages
-                return iced::Command::perform(async {}, |_| Msg::LoadPrivateMessages(username));
-            }
-            Msg::PrivateMessageChanged(text) => {
-                self.private_message_input = text;
-            }
-            Msg::SendPrivateMessage(to_user) => {
-                if !self.private_message_input.trim().is_empty() {
-                    let message_content = self.private_message_input.clone();
-                    self.private_message_input.clear();
-                    
-                    if let Some(token) = self.session_token.clone() {
-                        let cfg = ClientConfig::from_env();
-                        let host = match self.selected_host {
-                            HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                            HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                            HostType::Manual => self.manual_host.clone(),
-                        };
-                        let token_clone = token.clone();
-                        let username_clone = self.username.clone();
-                        let to_user_clone = to_user.clone();
-                        let svc = chat_service.clone();
-                        
-                        return iced::Command::perform(async move {
-                            let mut guard = svc.lock().await;
-                            match guard.send_private_message(&host, &token_clone, &to_user_clone, &message_content).await {
-                                Ok(resp) if resp.starts_with("OK:") => {
-                                    Msg::LoadPrivateMessages(to_user_clone)
-                                }
-                                Ok(resp) => Msg::LogError(format!("Send failed: {}", resp)),
-                                Err(e) => Msg::LogError(format!("Send error: {}", e)),
-                            }
-                        }, |m| m);
-                    }
-                }
-            }
-            Msg::LoadPrivateMessages(with_user) => {
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let token_clone = token.clone();
-                    let with_user_clone = with_user.clone();
-                    let svc = chat_service.clone();
-                    
-                    return iced::Command::perform(async move {
-                        let mut guard = svc.lock().await;
-                        match guard.get_private_messages(&host, &token_clone, &with_user_clone).await {
-                            Ok(messages) => Msg::PrivateMessagesLoaded { with_user: with_user_clone, messages },
-                            Err(e) => Msg::LogError(format!("Load messages failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::PrivateMessagesLoaded { with_user, messages } => {
-                // Parse messages and create PrivateMessage structs
-                println!("[DEBUG] Loading messages - current_username: '{}', with_user: '{}'", self.username, with_user);
-                
-                self.private_messages = messages.into_iter().filter_map(|msg| {
-                    // Debug: print the raw message
-                    println!("[DEBUG] Raw message from server: '{}'", msg);
-                    
-                    // Server format: "[timestamp] sender_id: content"
-                    // First, extract the timestamp part
-                    if let Some(bracket_end) = msg.find("] ") {
-                        let timestamp_str = &msg[1..bracket_end]; // Remove the '[' and ']'
-                        let rest = &msg[bracket_end + 2..]; // Skip '] '
-                        
-                        // Now parse "sender_id: content"
-                        if let Some((sender_id, content)) = rest.split_once(": ") {
-                            // Convert timestamp to readable format using local time
-                            let readable_timestamp = if let Ok(timestamp) = timestamp_str.parse::<i64>() {
-                                // Convert Unix timestamp to local time
-                                chrono::DateTime::from_timestamp(timestamp, 0)
-                                    .map(|dt| dt.with_timezone(&Local).format("%H:%M").to_string())
-                                    .unwrap_or_else(|| timestamp_str.to_string())
-                            } else {
-                                timestamp_str.to_string()
-                            };
-                            
-                            // Determine if this message was sent by current user
-                            // Use the stored UUID of the current user
-                            let is_sent_by_me = if let Some(ref current_uuid) = self.current_user_uuid {
-                                sender_id == current_uuid
-                            } else {
-                                // Fallback to hardcoded logic if UUID not available
-                                let luigi_uuid = "6e991eec-426b-4cab-b2b7-b511f11bdc61";
-                                let dory_uuid = "862758e3-2edb-447f-a53c-058e00d095a2";
-                                
-                                if self.username == "Luigi13" {
-                                    sender_id == luigi_uuid
-                                } else if self.username == "Dory" {
-                                    sender_id == dory_uuid
-                                } else {
-                                    false
-                                }
-                            };
-                            
-                            println!("[DEBUG] IMPROVED LOGIC - sender_id: '{}', current_user_uuid: '{:?}', current_username: '{}', is_sent_by_me: {}", 
-                                     sender_id, self.current_user_uuid, self.username, is_sent_by_me);
-                            
-                            // For display purposes, use actual usernames
-                            let from_user = if is_sent_by_me {
-                                self.username.clone()
-                            } else {
-                                with_user.clone()
-                            };
-                            
-                            Some(PrivateMessage {
-                                from_user,
-                                to_user: if is_sent_by_me { with_user.clone() } else { self.username.clone() },
-                                content: content.to_string(),
-                                timestamp: readable_timestamp,
-                                is_sent_by_me,
-                            })
-                        } else {
-                            None
-                        }
-                    } else {
-                        // Fallback for messages without timestamp
-                        if let Some((sender_info, content)) = msg.split_once(": ") {
-                            let is_sent_by_me = sender_info != with_user;
-                            Some(PrivateMessage {
-                                from_user: if is_sent_by_me { self.username.clone() } else { sender_info.to_string() },
-                                to_user: if is_sent_by_me { with_user.clone() } else { self.username.clone() },
-                                content: content.to_string(),
-                                timestamp: "".to_string(),
-                                is_sent_by_me,
-                            })
-                        } else {
-                            None
-                        }
-                    }
-                }).collect();
-                
-                println!("[DEBUG] Loaded {} messages for chat with {}", self.private_messages.len(), with_user);
-                for msg in &self.private_messages {
-                    println!("[DEBUG] Message: from={}, content={}, is_sent_by_me={}, timestamp={}", 
-                             msg.from_user, msg.content, msg.is_sent_by_me, msg.timestamp);
-                }
-            }
-            _ => {}
-=======
             Msg::TriggerImmediateRefresh { with: _ } => {
                 // This message is handled at the app level
             }
             _ => (),
->>>>>>> b08dc3b595f658f02b31de5ddc0ef5aa6b30a912
         }
         iced::Command::none()
     }

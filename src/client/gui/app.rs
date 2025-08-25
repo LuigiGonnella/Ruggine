@@ -60,8 +60,8 @@ impl Application for ChatApp {
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
-        use crate::client::models::messages::Message as Msg;
-        match &message {
+    use crate::client::models::messages::Message as Msg;
+    match message.clone() {
             Msg::SubmitLoginOrRegister => {
                 let username = self.state.username.clone();
                 let password = self.state.password.clone();
@@ -113,30 +113,25 @@ impl Application for ChatApp {
             }
             Msg::StartMessagePolling { with } => {
                 if !self.state.polling_active {
+                    println!("[APP] StartMessagePolling requested for {}", with);
                     self.state.polling_active = true;
                     let svc = self.chat_service.clone();
                     let token = self.state.session_token.clone().unwrap_or_default();
                     let cfg = crate::server::config::ClientConfig::from_env();
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                     let username = with.clone();
-                    
                     return Command::perform(
                         async move {
-                            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
-                            loop {
-                                interval.tick().await;
-                                
-                                let mut guard = svc.lock().await;
-                                match guard.get_private_messages(&host, &token, &username).await {
-                                    Ok(messages) => {
-                                        drop(guard);
-                                        return Msg::NewMessagesReceived { with: username.clone(), messages };
-                                    }
-                                    Err(_) => {
-                                        // Continue polling on error
-                                        drop(guard);
-                                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                                    }
+                            println!("[APP] Fetching messages for {}", username);
+                            let mut guard = svc.lock().await;
+                            match guard.get_private_messages(&host, &token, &username).await {
+                                Ok(messages) => {
+                                    println!("[APP] Fetched {} messages for {}", messages.len(), username);
+                                    Msg::NewMessagesReceived { with: username.clone(), messages }
+                                }
+                                Err(e) => {
+                                    println!("[APP] Fetch failed for {}: {}", username, e);
+                                    Msg::NewMessagesReceived { with: username.clone(), messages: vec![] }
                                 }
                             }
                         },
@@ -151,6 +146,7 @@ impl Application for ChatApp {
             }
             Msg::NewMessagesReceived { with, messages } => {
                 if self.state.polling_active {
+                    println!("[APP] NewMessagesReceived for {}: {} messages", with, messages.len());
                     self.state.private_chats.insert(with.clone(), messages.to_vec());
                     
                     // Continue polling
@@ -162,7 +158,7 @@ impl Application for ChatApp {
                     
                     return Command::perform(
                         async move {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                             let mut guard = svc.lock().await;
                             match guard.get_private_messages(&host, &token, &username).await {
                                 Ok(messages) => {
@@ -180,33 +176,21 @@ impl Application for ChatApp {
                 }
             }
             Msg::TriggerImmediateRefresh { with } => {
-                // Force an immediate message refresh without waiting for the next polling cycle
-                let svc = self.chat_service.clone();
+                let host = self.state.manual_host.clone();
                 let token = self.state.session_token.clone().unwrap_or_default();
-                let cfg = crate::server::config::ClientConfig::from_env();
-                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                let username = with.clone();
-                
-                return Command::perform(
-                    async move {
-                        let mut guard = svc.lock().await;
-                        match guard.get_private_messages(&host, &token, &username).await {
-                            Ok(messages) => {
-                                drop(guard);
-                                Msg::NewMessagesReceived { with: username.clone(), messages }
-                            }
-                            Err(_) => {
-                                drop(guard);
-                                Msg::NewMessagesReceived { with: username.clone(), messages: vec![] }
-                            }
-                        }
-                    },
-                    |msg| msg,
-                );
+                let svc = self.chat_service.clone();
+                    let with_cloned = with.clone();
+                    return iced::Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            guard.get_private_messages(&host, &token, &with_cloned).await.unwrap_or_default()
+                        },
+                        move |messages| Msg::NewMessagesReceived { with: with.clone(), messages }
+                    );
             }
             _ => {}
         }
-    self.state.update(message, &self.chat_service)
+    self.state.update(message.clone(), &self.chat_service)
     }
 
     fn view(&self) -> Element<Message> {

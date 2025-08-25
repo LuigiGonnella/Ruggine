@@ -36,7 +36,7 @@ pub fn view<'a>(state: &'a ChatAppState, kind: &'a str) -> Element<'a, Message> 
                 .align_items(Alignment::Center)
                 .push(Text::new(username).style(TEXT_PRIMARY))
                 .push(Space::new(Length::Fill, Length::Fixed(0.0)))
-                .push(Button::new(Text::new("Send Message")).on_press(Message::StartPrivateChat(username.clone())).padding(6));
+                .push(Button::new(Text::new("Send Message")).on_press(Message::OpenPrivateChat(username.clone())).padding(6));
             list_col = list_col.push(row);
         }
     }

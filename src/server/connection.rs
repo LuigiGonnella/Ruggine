@@ -293,7 +293,7 @@ impl Server {
             "/get_group_messages" if args.len() == 2 => {
                 let session_token = args[0];
                 let group_name = args[1];
-                messages::get_group_messages(self.db.clone(), session_token, group_name).await
+                messages::get_group_messages(self.db.clone(), session_token, group_name, &self.config).await
             }
             "/get_private_messages" if args.len() == 2 => {
                 let session_token = args[0];

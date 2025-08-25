@@ -54,13 +54,6 @@ pub enum Message {
     JoinGroup { group_id: String },
     LeaveGroup { group_id: String },
     // Private chat messages
-<<<<<<< HEAD
-    StartPrivateChat(String), // username to start chat with
-    PrivateMessageChanged(String), // text input changed
-    SendPrivateMessage(String), // username to send message to
-    PrivateMessagesLoaded { with_user: String, messages: Vec<String> },
-    LoadPrivateMessages(String), // username to load messages from
-=======
     MessageInputChanged(String),
     SendPrivateMessage { to: String },
     LoadPrivateMessages { with: String },
@@ -70,5 +63,4 @@ pub enum Message {
     StopMessagePolling,
     NewMessagesReceived { with: String, messages: Vec<crate::client::models::app_state::ChatMessage> },
     TriggerImmediateRefresh { with: String },
->>>>>>> b08dc3b595f658f02b31de5ddc0ef5aa6b30a912
 }
