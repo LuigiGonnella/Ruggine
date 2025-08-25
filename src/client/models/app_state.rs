@@ -141,6 +141,43 @@ impl ChatAppState {
                         level: LogLevel::Error,
                         message: message.clone(),
                     });
+                    // Reload friend requests to update the UI
+                    if let Some(token) = &self.session_token {
+                        let cfg = crate::server::config::ClientConfig::from_env();
+                        let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                        let svc = chat_service.clone();
+                        let token_clone = token.clone();
+                        return Command::perform(
+                            async move {
+                                let mut guard = svc.lock().await;
+                                let cmd = format!("/received_friend_requests {}", token_clone);
+                                match guard.send_command(&host, cmd).await {
+                                    Ok(response) => {
+                                        if response.starts_with("OK:") {
+                                            let requests = if let Some(after) = response.splitn(3, ':').nth(2) {
+                                                after.split('|').filter_map(|s| {
+                                                    let s = s.trim();
+                                                    if s.is_empty() { return None; }
+                                                    if let Some((username, message)) = s.split_once(':') {
+                                                        Some((username.trim().to_string(), message.trim().to_string()))
+                                                    } else {
+                                                        Some((s.to_string(), "".to_string()))
+                                                    }
+                                                }).collect()
+                                            } else {
+                                                vec![]
+                                            };
+                                            Message::FriendRequestsLoaded { requests }
+                                        } else {
+                                            Message::FriendRequestsLoaded { requests: vec![] }
+                                        }
+                                    }
+                                    Err(_) => Message::FriendRequestsLoaded { requests: vec![] }
+                                }
+                            },
+                            |msg| msg,
+                        );
+                    }
 
                     // Auto-clear error logger after 2 seconds to match other flows
                     return Command::perform(
