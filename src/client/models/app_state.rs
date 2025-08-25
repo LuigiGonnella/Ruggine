@@ -158,6 +158,7 @@ impl ChatAppState {
                 let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                     let cfg = crate::server::config::ClientConfig::from_env();
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let token_clone = token.clone();
                     
                     // Send logout command asynchronously but don't wait for response
                     tokio::spawn(async move {
