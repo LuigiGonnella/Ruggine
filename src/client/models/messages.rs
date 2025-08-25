@@ -36,8 +36,6 @@ pub enum Message {
     DeletePrivateMessagesTest,
     // Friend system actions
     SendFriendRequest { to: String, message: String },
-    AcceptFriendRequest { from: String },
-    RejectFriendRequest { from: String },
     ListFriends,
     ReceivedFriendRequests,
     SentFriendRequests,
@@ -51,7 +49,6 @@ pub enum Message {
     InviteToGroup { group_id: String, username: String },
     MyGroupInvites,
     JoinGroup { group_id: String },
-    LeaveGroup { group_id: String },
     // Private chat messages
     MessageInputChanged(String),
     SendPrivateMessage { to: String },
@@ -92,7 +89,7 @@ pub enum Message {
     RejectGroupInvite { invite_id: i64 },
     GroupInviteActionResult { success: bool, message: String },
     // Leave group
-    LeaveGroup { group_id: String },
+    LeaveGroup { group_id: String, group_name: String},
     LeaveGroupResult { success: bool, message: String },
     // Discard messages feature
     DiscardPrivateMessages { with: String },
@@ -107,4 +104,6 @@ pub enum Message {
     RejectFriendRequestFromUser { username: String },
     FriendsLoaded { friends: Vec<String> },
     FriendRequestsLoaded { requests: Vec<(String, String)> },
+    InviteToGroupResult{success: bool, message: String},
+    DiscardMessagesResult { success: bool, message: String },
 }

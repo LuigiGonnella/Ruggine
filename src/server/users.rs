@@ -24,6 +24,7 @@ pub async fn send_friend_request(db: Arc<Database>, from_user_id: &str, to_usern
         return "ERR: Siete già amici".to_string();
     }
     
+    
     // Controlla se già esiste una richiesta pendente
     let check = sqlx::query("SELECT id FROM friend_requests WHERE from_user_id = ? AND to_user_id = ? AND status = 'pending'")
         .bind(from_user_id)

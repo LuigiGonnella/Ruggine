@@ -235,7 +235,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
                                     .center_x()
                                 )
                                 .style(iced::theme::Button::Destructive)
-                                .on_press(Message::LeaveGroup { group_id: group_id.clone() })
+                                .on_press(Message::LeaveGroup { group_id: group_id.clone(), group_name: group_name.clone() })
                                 .padding(8)
                                 .width(Length::Fixed(40.0))
                             )
