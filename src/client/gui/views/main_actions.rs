@@ -2,6 +2,7 @@ use iced::{Element, Length, Alignment, Color, Font};
 use iced::widget::{Column, Row, Text, Button, Container, Space};
 use crate::client::models::messages::Message;
 use crate::client::models::app_state::ChatAppState;
+use crate::client::gui::views::logger::logger_view;
 
 // Modern color palette consistent with registration.rs
 const BG_MAIN: Color = Color::from_rgb(0.06, 0.07, 0.18); // Deep navy
@@ -219,6 +220,16 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .push(invites_card)
         .push(friends_card);
 
+    // Top logger bar
+    let logger_bar: Element<Message> = if !state.logger.is_empty() {
+        Container::new(logger_view(&state.logger))
+            .width(Length::Fill)
+            .padding([8, 12, 0, 12])
+            .into()
+    } else {
+        Space::new(Length::Fill, Length::Fixed(0.0)).into()
+    };
+
     // Main content with scrollable area
     let main_content = Column::new()
         .push(header)
@@ -232,16 +243,12 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .width(Length::Fill)
         .height(Length::Fill);
 
-    // Combine main content with logger overlay
-    let final_content = if let Some(logger) = logger_overlay {
-        Column::new()
-            .push(logger)
-            .push(main_content)
-            .width(Length::Fill)
-            .height(Length::Fill)
-    } else {
-        main_content
-    };
+    // Render logger bar above main content
+    let final_content = Column::new()
+        .push(logger_bar)
+        .push(main_content)
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     Container::new(final_content)
         .width(Length::Fill)

@@ -225,7 +225,8 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
                 Err(_) => vec![],
             };
 
-            let msgs: Vec<String> = rows.iter().map(|r| {
+            let mut msgs: Vec<String> = Vec::with_capacity(rows.len());
+            for r in rows.iter() {
                 let sender_id: String = r.get("sender_id");
                 // Per i gruppi, converti sender_id in username
                 let sender_name = if let Ok(Some(user_row)) = sqlx::query("SELECT username FROM users WHERE id = ?")
@@ -244,8 +245,8 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
                     Ok(s) => s,
                     Err(_) => "[DECRYPTION FAILED]".to_string(),
                 };
-                format!("[{}] {}: {}", ts, sender_name, clear)
-            }).collect();
+                msgs.push(format!("[{}] {}: {}", ts, sender_name, clear));
+            }
             format!("OK: Messages:\n{}", msgs.join("\n"))
         }
         Err(e) => {
