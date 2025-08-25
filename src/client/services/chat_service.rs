@@ -303,7 +303,7 @@ impl ChatService {
     }
 }
 
-}
+
 
 impl ChatService {
     /// Retrieve group messages and return them parsed as Vec<ChatMessage>.
@@ -313,3 +313,4 @@ impl ChatService {
         let msgs = message_parser::parse_group_messages(&resp).map_err(|e| anyhow::anyhow!(e))?;
         Ok(msgs)
     }
+}

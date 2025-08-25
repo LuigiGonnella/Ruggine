@@ -330,12 +330,15 @@ impl ChatAppState {
             Message::GroupsListLoaded { groups } => {
                 // For now, if we have groups, open the first one as a demo
                 if !groups.is_empty() {
-                    let first_group = &groups[0];
+                    // Clone the first group's full string to own its data, then split and clone parts
+                    let first_group_owned = groups[0].clone();
                     // Expected format: "id:name"
-                    if let Some((group_id, group_name)) = first_group.split_once(':') {
+                    if let Some((group_id_part, group_name_part)) = first_group_owned.split_once(':') {
+                        let group_id_owned = group_id_part.to_string();
+                        let group_name_owned = group_name_part.to_string();
                         return Command::perform(
                             async move { 
-                                Message::OpenGroupChat(group_id.to_string(), group_name.to_string()) 
+                                Message::OpenGroupChat(group_id_owned, group_name_owned)
                             },
                             |msg| msg,
                         );
