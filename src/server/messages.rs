@@ -76,7 +76,8 @@ pub async fn send_group_message(db: Arc<Database>, session_token: &str, group_na
         Some(uid) => uid,
         None => return "ERR: Invalid session".to_string(),
     };
-    let group_row = sqlx::query("SELECT id FROM groups WHERE name = ?")
+    // group_name is actually group_id in this context
+    let group_row = sqlx::query("SELECT id FROM groups WHERE id = ?")
         .bind(group_name)
         .fetch_optional(&db.pool)
         .await;
@@ -187,7 +188,8 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
         Some(uid) => uid,
         None => return "ERR: Invalid session".to_string(),
     };
-    let group_row = sqlx::query("SELECT id FROM groups WHERE name = ?")
+    // group_name is actually group_id in this context
+    let group_row = sqlx::query("SELECT id FROM groups WHERE id = ?")
         .bind(group_name)
         .fetch_optional(&db.pool)
         .await;
@@ -227,10 +229,10 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
                 let sender: String = r.get("sender_id");
                 let msg: String = r.get("message");
                 let ts: i64 = r.get("sent_at");
-                // Attempt to decrypt; if decryption fails, fall back to raw stored message
+                // Attempt to decrypt; if decryption fails, show placeholder
                 let clear = match decrypt_message_from_storage(&msg, &group_members, config) {
                     Ok(s) => s,
-                    Err(_) => msg.clone(),
+                    Err(_) => "[DECRYPTION FAILED]".to_string(),
                 };
                 format!("[{}] {}: {}", ts, sender, clear).into()
             }).collect();

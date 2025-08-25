@@ -73,7 +73,7 @@ pub async fn create_group_with_participants(db: Arc<Database>, user_id: &str, gr
                 return format!("ERR: Could not add creator as member: {}", e);
             }
             
-            // Add participants if provided
+            // Send invites to participants if provided (don't add them directly)
             if let Some(participants_str) = participants {
                 let participant_usernames: Vec<&str> = participants_str.split(',').collect();
                 for username in participant_usernames {
@@ -86,13 +86,15 @@ pub async fn create_group_with_participants(db: Arc<Database>, user_id: &str, gr
                             .await
                         {
                             let participant_id: String = row.get("id");
-                            let _ = sqlx::query("INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)")
+                            // Create invite instead of adding directly to group
+                            let _ = sqlx::query("INSERT INTO group_invites (group_id, invited_user_id, invited_by, created_at, status) VALUES (?, ?, ?, ?, 'pending')")
                                 .bind(&group_id)
                                 .bind(&participant_id)
+                                .bind(user_id)
                                 .bind(created_at)
                                 .execute(&mut *tx)
                                 .await;
-                            println!("[GROUPS] Added participant {} to group {}", username, group_id);
+                            println!("[GROUPS] Sent invite to participant {} for group {}", username, group_id);
                         }
                     }
                 }
