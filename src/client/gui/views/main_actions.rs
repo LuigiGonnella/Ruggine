@@ -73,7 +73,7 @@ fn header_appearance(_: &iced::Theme) -> iced::widget::container::Appearance {
 // Build a modern action card with icon, title, detail and buttons
 fn action_card<'a>(icon: &'a str, title: &'a str, detail: &'a str, btn_label: &'a str, action: Message, secondary: Option<(&'a str, Message)>) -> Element<'a, Message> {
     let title_row = Row::new()
-        .spacing(12)
+        .spacing(if title == "Invites" { 8 } else { 12 })
         .align_items(Alignment::Center)
         .push(Text::new(icon).font(EMOJI_FONT).size(24).style(TEXT_PRIMARY))
         .push(Text::new(title).font(BOLD_FONT).size(20).style(TEXT_PRIMARY));
@@ -105,7 +105,7 @@ fn action_card<'a>(icon: &'a str, title: &'a str, detail: &'a str, btn_label: &'
         let secondary_btn = Button::new(
             Text::new(link_label)
                 .size(14)
-                .style(TEXT_SECONDARY)
+                .style(Color::from_rgb(0.5, 0.5, 0.6)) // Darker for better contrast
         )
         .style(iced::theme::Button::Secondary)
         .on_press(link_msg)

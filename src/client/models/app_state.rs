@@ -131,6 +131,13 @@ impl ChatAppState {
                 // Clear session token from secure storage
                 let _ = session_store::clear_session_token();
                 
+                // Show logout message temporarily
+                self.logger.clear();
+                self.logger.push(LogMessage {
+                    level: LogLevel::Info,
+                    message: "Logout successful".to_string(),
+                });
+                
                 // Send logout command if we have a token
                 if let Some(token) = &self.session_token {
                     let svc = chat_service.clone();
@@ -150,8 +157,15 @@ impl ChatAppState {
                 self.username.clear();
                 self.password.clear();
                 self.app_state = AppState::Registration;
-                // Clear logger completely on logout for clean slate
-                self.logger.clear();
+                
+                // Clear logger after a delay for temporary logout message
+                return Command::perform(
+                    async move {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        Message::ClearLog
+                    },
+                    |msg| msg,
+                );
             }
             Message::ClearLog => {
                 self.logger.clear();
@@ -333,11 +347,15 @@ impl ChatAppState {
                 self.private_chats.insert(with.clone(), messages);
                 self.loading_private_chats.remove(&with);
                 
-                // Auto-scroll to bottom when messages are loaded
-                return scrollable::snap_to(
-                    scrollable::Id::new("messages_scroll"),
-                    scrollable::RelativeOffset::END
-                );
+                // Auto-scroll to bottom when messages are loaded (for recipient)
+                if let AppState::PrivateChat(current_chat) = &self.app_state {
+                    if current_chat == &with {
+                        return scrollable::snap_to(
+                            scrollable::Id::new("messages_scroll"),
+                            scrollable::RelativeOffset::END
+                        );
+                    }
+                }
             }
             // Placeholder implementations for other messages
             _ => {
