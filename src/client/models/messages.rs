@@ -26,6 +26,7 @@ pub enum Message {
     UsersSearchQueryChanged(String),
     UsersSearch,
     UsersListLoaded { kind: String, list: Vec<String> },
+    UsersListFiltered { list: Vec<String> },
     // Test network actions triggered from main_actions (use defaults in the UI)
     SendGroupMessageTest,
     SendPrivateMessageTest,

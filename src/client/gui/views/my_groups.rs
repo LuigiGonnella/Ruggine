@@ -221,11 +221,6 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
                         Column::new()
                             .spacing(4)
                             .push(Text::new(group_name).font(BOLD_FONT).size(16).style(TEXT_PRIMARY))
-                            .push(
-                                Text::new(format!("{} member{}", member_count, if *member_count == 1 { "" } else { "s" }))
-                                    .size(12)
-                                    .style(TEXT_SECONDARY)
-                            )
                     )
                     .push(Space::new(Length::Fill, Length::Fixed(0.0)))
                     .push(

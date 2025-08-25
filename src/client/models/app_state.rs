@@ -954,6 +954,10 @@ impl ChatAppState {
                     .filter(|u| u != &self.username)
                     .collect();
             }
+            Message::UsersListFiltered { list } => {
+                self.users_search_results = list.clone();
+                Command::none()
+            }
             Message::ListOnlineUsers => {
                 return Command::perform(
                     async { Message::OpenUsersList { kind: "Online".to_string() } },
@@ -1134,6 +1138,7 @@ impl ChatAppState {
             // Placeholder implementations for other messages
             _ => {
                 // Handle other messages as needed
+                Command::none()
             }
         }
 
