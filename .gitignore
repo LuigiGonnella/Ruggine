@@ -1,5 +1,5 @@
 #docs
-.doc/
+doc/
 
 # Rust/Cargo generated files
 **/target/
@@ -38,6 +38,7 @@ data/
  .env.local
  .env.production
  .env.example
+**/.env.*
 
 # Temporary files
 *.tmp
