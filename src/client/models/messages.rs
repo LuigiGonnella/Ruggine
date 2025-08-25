@@ -96,13 +96,6 @@ pub enum Message {
     OpenSendFriendRequest,
     OpenViewFriends,
     SendFriendRequestToUser { username: String, message: String },
-    AcceptFriendRequestFromUser { username: String },
-    RejectFriendRequestFromUser { username: String },
-    FriendsLoaded { friends: Vec<String> },
-    FriendRequestsLoaded { requests: Vec<(String, String)> },
-    FriendRequestResult { success: bool, message: String },
-    // Leave group feature
-    LeaveGroup { group_id: String, group_name: String },
     LeaveGroupResult { success: bool, message: String },
     // Discard messages feature
     DiscardPrivateMessages { with: String },
