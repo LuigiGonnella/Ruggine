@@ -85,20 +85,25 @@ pub enum Message {
     RemoveParticipant(String),
     MyGroupsLoaded { groups: Vec<(String, String, usize)> }, // (id, name, member_count)
     InviteUserToGroup { group_id: String, username: String },
-    InviteToGroupResult { success: bool, message: String },
     // Group invites management
     OpenMyGroupInvites,
     MyGroupInvitesLoaded { invites: Vec<(i64, String, String)> }, // (invite_id, group_name, invited_by)
     AcceptGroupInvite { invite_id: i64 },
     RejectGroupInvite { invite_id: i64 },
     GroupInviteActionResult { success: bool, message: String },
+    // Leave group
+    LeaveGroup { group_id: String },
+    LeaveGroupResult { success: bool, message: String },
     // Friend system
     OpenSendFriendRequest,
     OpenViewFriends,
     SendFriendRequestToUser { username: String, message: String },
-    LeaveGroupResult { success: bool, message: String },
+    FriendRequestResult { success: bool, message: String },
+    // Friend request management
+    AcceptFriendRequestFromUser { username: String },
+    RejectFriendRequestFromUser { username: String },
+    FriendsLoaded { friends: Vec<String> },
+    FriendRequestsLoaded { requests: Vec<(String, String)> },
     // Discard messages feature
     DiscardPrivateMessages { with: String },
     DiscardGroupMessages { group_id: String },
-    DiscardMessagesResult { success: bool, message: String },
-}
