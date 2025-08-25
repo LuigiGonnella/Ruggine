@@ -1158,7 +1158,7 @@ impl ChatAppState {
                                 Err(_) => Message::MyGroupsLoaded { groups: vec![] },
                             }
                         },
-                        |groups| Message::MyGroupsLoaded { groups: vec![] }
+                        |msg| msg
                     );
                 } else {
                     self.logger.push(LogMessage {
