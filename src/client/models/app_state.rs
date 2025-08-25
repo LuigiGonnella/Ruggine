@@ -697,6 +697,12 @@ impl ChatAppState {
                     );
                 }
             }
+            Message::InviteToGroupResult { success, message } => {
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message,
+                });
+            }
             Message::OpenMyGroupInvites => {
                 self.app_state = AppState::MyGroupInvites;
                 self.loading_invites = true;
@@ -812,20 +818,6 @@ impl ChatAppState {
                                 },
                             }
                         },
-                        |msg| msg,
-                    );
-                }
-            }
-            Message::GroupInviteActionResult { success, message } => {
-                self.logger.push(LogMessage {
-                    level: if success { LogLevel::Success } else { LogLevel::Error },
-                    message,
-                });
-                
-                // Refresh invites list after action
-                if success {
-                    return Command::perform(
-                        async move { Message::OpenMyGroupInvites },
                         |msg| msg,
                     );
                 }

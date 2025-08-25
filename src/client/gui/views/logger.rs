@@ -50,9 +50,10 @@ impl LogMessage {
     }
 }
 
-pub fn logger_view(messages: &[LogMessage]) -> Element<'_, crate::client::models::messages::Message> {
+pub fn logger_view<'a>(messages: &'a [LogMessage]) -> Element<'a, crate::client::models::messages::Message> {
     // Show only the latest message as an alert bar (single message at a time)
     if let Some(log) = messages.iter().rev().next() {
+        let log_color = log.color();
         Container::new(
             Row::new()
                 .spacing(12)
@@ -60,15 +61,15 @@ pub fn logger_view(messages: &[LogMessage]) -> Element<'_, crate::client::models
                     Text::new(log.emoji())
                         .font(Font::with_name("Segoe UI Emoji"))
                         .size(20)
-                        .style(log.color())
+                        .style(log_color)
                 )
-                .push(Text::new(&log.message).size(18).style(log.color()))
+                .push(Text::new(&log.message).size(18).style(log_color))
         )
         .padding([12, 16])
         .width(Length::Fill)
         .style(iced::theme::Container::Custom(Box::new(move |_: &iced::Theme| {
             iced::widget::container::Appearance {
-                background: Some(iced::Background::Color(log.color())),
+                background: Some(iced::Background::Color(log_color)),
                 text_color: Some(iced::Color::WHITE),
                 border: iced::Border {
                     radius: 8.0.into(),
