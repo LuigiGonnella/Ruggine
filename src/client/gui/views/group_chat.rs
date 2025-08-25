@@ -21,7 +21,7 @@ const BOLD_FONT: Font = Font {
 pub fn view<'a>(state: &'a ChatAppState, group_id: &'a str, group_name: &'a str) -> Element<'a, Message> {
     // Header con nome gruppo e pulsante back
     let back_btn = Button::new(Text::new("← Back").size(16))
-        .on_press(Message::OpenMainActions)
+        .on_press(Message::StopGroupMessagePolling)
         .style(iced::theme::Button::Secondary)
         .padding(8);
 

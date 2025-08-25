@@ -62,6 +62,8 @@ pub enum Message {
     StopMessagePolling,
     NewMessagesReceived { with: String, messages: Vec<crate::client::models::app_state::ChatMessage> },
     TriggerImmediateRefresh { with: String },
+    // Navigation with polling control
+    OpenMainActions,
     // Group chat messages
     SendGroupMessage { group_id: String },
     LoadGroupMessages { group_id: String },

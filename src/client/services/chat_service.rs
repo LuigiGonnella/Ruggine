@@ -23,6 +23,12 @@ impl ChatService {
     pub fn new() -> Self {
         Self { tx: None, _bg: None }
     }
+    
+    /// Reset the service by dropping existing connections and background tasks
+    pub fn reset(&mut self) {
+        self.tx = None;
+        self._bg = None;
+    }
 
     /// Ensure there is an active background task connected to `host`.
     pub async fn ensure_connected(&mut self, host: &str) -> anyhow::Result<()> {
