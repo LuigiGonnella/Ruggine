@@ -86,6 +86,8 @@ pub struct ChatAppState {
     pub loading_invites: bool,
     pub friends_list: Vec<String>,
     pub friend_requests: Vec<(String, String)>, // (username, message)
+    pub discarded_private_chats: std::collections::HashMap<String, i64>, // username -> timestamp
+    pub discarded_group_chats: std::collections::HashMap<String, i64>, // group_id -> timestamp
     pub discarded_private_chats: std::collections::HashSet<String>,
 }
 

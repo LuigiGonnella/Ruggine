@@ -94,6 +94,9 @@ pub enum Message {
     // Leave group
     LeaveGroup { group_id: String },
     LeaveGroupResult { success: bool, message: String },
+    // Discard messages feature
+    DiscardPrivateMessages { with: String },
+    DiscardGroupMessages { group_id: String },
     // Friend system
     OpenSendFriendRequest,
     OpenViewFriends,
@@ -104,6 +107,4 @@ pub enum Message {
     RejectFriendRequestFromUser { username: String },
     FriendsLoaded { friends: Vec<String> },
     FriendRequestsLoaded { requests: Vec<(String, String)> },
-    // Discard messages feature
-    DiscardPrivateMessages { with: String },
-    DiscardGroupMessages { group_id: String },
+}
