@@ -188,14 +188,6 @@ impl ChatAppState {
                 self.username.clear();
                 self.password.clear();
                 self.app_state = AppState::Registration;
-                // Stop all polling activities
-                self.polling_active = false;
-                self.group_polling_active = false;
-                // Clear chat data
-                self.private_chats.clear();
-                self.group_chats.clear();
-                self.loading_private_chats.clear();
-                self.loading_group_chats.clear();
                 
                 // Clear logger after a delay for temporary logout message
                 return Command::perform(
@@ -228,14 +220,9 @@ impl ChatAppState {
                 });
             }
             Message::OpenMainActions => {
-                // Stop all polling when returning to main actions
-                self.polling_active = false;
-                self.group_polling_active = false;
                 self.app_state = AppState::MainActions;
             }
             Message::OpenPrivateChat(username) => {
-                // Stop group polling if active
-                self.group_polling_active = false;
                 self.app_state = AppState::PrivateChat(username.clone());
                 self.current_message_input.clear();
                 // Mark this private chat as loading so the UI shows a loader
@@ -248,8 +235,6 @@ impl ChatAppState {
                 );
             }
             Message::OpenGroupChat(group_id, group_name) => {
-                // Stop private polling if active
-                self.polling_active = false;
                 self.app_state = AppState::GroupChat(group_id.clone(), group_name.clone());
                 self.current_message_input.clear();
                 // Mark this group chat as loading so the UI shows a loader
@@ -561,52 +546,6 @@ impl ChatAppState {
                     );
                 }
             }
-            Message::SendFriendRequestToUser { username, message } => {
-                if let Some(token) = &self.session_token {
-                    self.loading = true;
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    let username_clone = username.clone();
-                    let message_clone = message.clone();
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    
-                    return Command::perform(
-                        async move {
-                            let result = crate::client::services::friend_service::FriendService::send_friend_request(
-                                &svc, &host, &token_clone, &username_clone, &message_clone
-                            ).await;
-                            
-                            match result {
-                                Ok(response) => {
-                                    if response.starts_with("OK:") {
-                                        Message::FriendRequestResult { 
-                                            success: true, 
-                                            message: response.trim_start_matches("OK:").trim().to_string() 
-                                        }
-                                    } else {
-                                        Message::FriendRequestResult { 
-                                            success: false, 
-                                            message: response.trim_start_matches("ERR:").trim().to_string() 
-                                        }
-                                    }
-                                }
-                                Err(e) => Message::FriendRequestResult { 
-                                    success: false, 
-                                    message: format!("Errore di connessione: {}", e) 
-                                }
-                            }
-                        },
-                        |msg| msg
-                    );
-                } else {
-                    self.logger.push(LogMessage { 
-                        level: LogLevel::Error, 
-                        message: "Devi effettuare il login per inviare richieste di amicizia".to_string() 
-                    });
-                    Command::none()
-                }
-            }
             Message::FriendsLoaded { friends } => {
                 self.loading = false;
                 self.friends_list = friends;
@@ -616,18 +555,10 @@ impl ChatAppState {
                 self.friend_requests = requests;
             }
             Message::FriendRequestResult { success, message } => {
-                self.loading = false;
-                if success {
-                    self.logger.push(LogMessage { 
-                        level: LogLevel::Success, 
-                        message: format!("Richiesta di amicizia inviata: {}", message) 
-                    });
-                } else {
-                    self.logger.push(LogMessage { 
-                        level: LogLevel::Error, 
-                        message: format!("Errore nell'invio della richiesta: {}", message) 
-                    });
-                }
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message: message.clone(),
+                });
                 
                 // Auto-clear logger after 2 seconds
                 return Command::perform(
@@ -1112,6 +1043,16 @@ impl ChatAppState {
                         );
                     }
                 }
+            }
+            Message::StopMessagePolling => {
+                self.polling_active = false;
+                self.app_state = AppState::MainActions;
+                return Command::<Message>::none();
+            }
+            Message::StopGroupMessagePolling => {
+                self.group_polling_active = false;
+                self.app_state = AppState::MainActions;
+                return Command::<Message>::none();
             }
             // Placeholder implementations for other messages
             _ => {

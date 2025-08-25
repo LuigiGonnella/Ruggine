@@ -269,7 +269,7 @@ impl Application for ChatApp {
             }
             _ => {}
         }
-        self.state.update(message.clone(), &self.chat_service)
+        self.state.update(message, &self.chat_service)
     }
 
     fn view(&self) -> Element<Message> {
