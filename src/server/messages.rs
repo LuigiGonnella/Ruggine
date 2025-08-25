@@ -215,12 +215,22 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
         .await;
     match rows {
         Ok(rows) => {
-            // For group messages we need the list of participants to derive the chat key
-            let members_rows = sqlx::query("SELECT user_id FROM group_members WHERE group_id = ?")
+            // Get current group members for the latest key
+            let current_members_rows = sqlx::query("SELECT user_id FROM group_members WHERE group_id = ?")
                 .bind(&group_id)
                 .fetch_all(&db.pool)
                 .await;
-            let group_members: Vec<String> = match members_rows {
+            let current_members: Vec<String> = match current_members_rows {
+                Ok(rows) => rows.iter().map(|r| r.get::<String, _>("user_id")).collect::<Vec<String>>(),
+                Err(_) => vec![],
+            };
+
+            // Get all historical member combinations for decryption fallback
+            let all_members_rows = sqlx::query("SELECT DISTINCT user_id FROM group_members WHERE group_id = ?")
+                .bind(&group_id)
+                .fetch_all(&db.pool)
+                .await;
+            let all_historical_members: Vec<String> = match all_members_rows {
                 Ok(rows) => rows.iter().map(|r| r.get::<String, _>("user_id")).collect::<Vec<String>>(),
                 Err(_) => vec![],
             };
@@ -240,11 +250,10 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
                 };
                 let msg: String = r.get("message");
                 let ts: i64 = r.get("sent_at");
-                // Attempt to decrypt; if decryption fails, show placeholder
-                let clear = match decrypt_message_from_storage(&msg, &group_members, config) {
-                    Ok(s) => s,
-                    Err(_) => "[DECRYPTION FAILED]".to_string(),
-                };
+                
+                // Try multiple decryption strategies for historical messages
+                let clear = decrypt_group_message_with_fallback(&msg, &current_members, &all_historical_members, &sender_id, config);
+                
                 msgs.push(format!("[{}] {}: {}", ts, sender_name, clear));
             }
             format!("OK: Messages:\n{}", msgs.join("\n"))
@@ -253,6 +262,80 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
             println!("[MSG] Error getting group messages: {}", e);
             format!("ERR: {}", e)
         }
+    }
+}
+
+/// Try multiple decryption strategies for group messages
+fn decrypt_group_message_with_fallback(
+    encrypted_data: &str,
+    current_members: &[String],
+    all_historical_members: &[String],
+    sender_id: &str,
+    config: &ServerConfig
+) -> String {
+    // Strategy 1: Try with current members
+    if let Ok(decrypted) = decrypt_message_from_storage(encrypted_data, current_members, config) {
+        return decrypted;
+    }
+    
+    // Strategy 2: Try with all possible historical member combinations
+    // Start with smaller combinations and work up
+    for size in 2..=all_historical_members.len() {
+        let combinations = generate_member_combinations(all_historical_members, size);
+        for combo in combinations {
+            if let Ok(decrypted) = decrypt_message_from_storage(encrypted_data, &combo, config) {
+                return decrypted;
+            }
+        }
+    }
+    
+    // Strategy 3: Try with just sender (for very old messages)
+    if let Ok(decrypted) = decrypt_message_from_storage(encrypted_data, &[sender_id.to_string()], config) {
+        return decrypted;
+    }
+    
+    // Strategy 4: If it's not encrypted JSON, return as plain text (legacy)
+    if !encrypted_data.starts_with('{') {
+        return encrypted_data.to_string();
+    }
+    
+    // Last resort: show decryption failed
+    "[DECRYPTION FAILED]".to_string()
+}
+
+/// Generate all possible combinations of members of a given size
+fn generate_member_combinations(members: &[String], size: usize) -> Vec<Vec<String>> {
+    if size == 0 || size > members.len() {
+        return vec![];
+    }
+    
+    if size == 1 {
+        return members.iter().map(|m| vec![m.clone()]).collect();
+    }
+    
+    let mut combinations = Vec::new();
+    generate_combinations_recursive(members, size, 0, &mut Vec::new(), &mut combinations);
+    combinations
+}
+
+fn generate_combinations_recursive(
+    members: &[String],
+    size: usize,
+    start: usize,
+    current: &mut Vec<String>,
+    result: &mut Vec<Vec<String>>
+) {
+    if current.len() == size {
+        let mut sorted_combo = current.clone();
+        sorted_combo.sort(); // Important: sort for consistent key generation
+        result.push(sorted_combo);
+        return;
+    }
+    
+    for i in start..members.len() {
+        current.push(members[i].clone());
+        generate_combinations_recursive(members, size, i + 1, current, result);
+        current.pop();
     }
 }
 
