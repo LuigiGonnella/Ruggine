@@ -262,6 +262,40 @@ impl ChatAppState {
             }
             Message::OpenFriendRequests => {
                 self.app_state = AppState::FriendRequests;
+                self.loading = true;
+                if let Some(token) = &self.session_token {
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let svc = chat_service.clone();
+                    Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/received_friend_requests {}", token_clone)).await {
+                                Ok(resp) if resp.starts_with("OK:") => {
+                                    // Parse "OK: Richieste ricevute: alice: msg | bob: msg"
+                                    let after = resp.splitn(3, ':').nth(2).unwrap_or("");
+                                    let requests: Vec<(String, String)> = after.split('|')
+                                        .map(|s| s.trim())
+                                        .filter(|s| !s.is_empty())
+                                        .filter_map(|s| {
+                                            if let Some((user, msg)) = s.split_once(':') {
+                                                Some((user.trim().to_string(), msg.trim().to_string()))
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                    Message::FriendRequestsLoaded { requests }
+                                }
+                                _ => Message::FriendRequestsLoaded { requests: vec![] }
+                            }
+                        },
+                        |msg| msg,
+                    )
+                } else {
+                    Command::none()
+                }
             }
             Message::OpenCreateGroup => {
                 self.app_state = AppState::CreateGroup;
@@ -463,43 +497,36 @@ impl ChatAppState {
                         },
                         |msg| msg,
                     );
-                }
-            }
-            Message::AcceptFriendRequestFromUser { username } => {
-                if let Some(token) = &self.session_token {
                     let token_clone = token.clone();
-                    let username_clone = username.clone();
                     let cfg = crate::server::config::ClientConfig::from_env();
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    let svc = chat_service.clone();
+                    
                     return Command::perform(
                         async move {
                             let mut guard = svc.lock().await;
-                            match guard.send_command(&host, format!("/accept_friend_request {} {}", token_clone, username_clone)).await {
-                                Ok(resp) if resp.starts_with("OK:") => {
-                                    Message::FriendRequestResult { 
-                                        success: true, 
-                                        message: format!("Friend request from {} accepted!", username_clone)
+                            match guard.send_command(&host, format!("/accept_friend_request {} {}", token_clone, username)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::FriendRequestResult { 
+                                            success: true, 
+                                            message: format!("Friend request from {} accepted!", username) 
+                                        }
+                                    } else {
+                                        Message::FriendRequestResult { 
+                                            success: false, 
+                                            message: response 
+                                        }
                                     }
                                 }
-                                Ok(resp) => {
-                                    Message::FriendRequestResult { 
-                                        success: false, 
-                                        message: resp 
-                                    }
-                                }
-                                Err(e) => {
-                                    Message::FriendRequestResult { 
-                                        success: false, 
-                                        message: format!("Error: {}", e) 
-                                    }
-                                }
+                                Err(e) => Message::FriendRequestResult { 
+                                    success: false, 
+                                    message: format!("Error accepting friend request: {}", e) 
+                                },
                             }
                         },
                         |msg| msg,
                     );
                 }
-                Command::none()
             }
             Message::RejectFriendRequestFromUser { username } => {
                 if let Some(token) = &self.session_token {
