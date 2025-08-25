@@ -77,21 +77,8 @@ pub fn view<'a>(state: &'a ChatAppState, username: &'a str) -> Element<'a, Messa
 fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Element<'a, Message> {
     let mut messages_column = Column::new().spacing(8).padding([12, 16]);
 
-    // If the chat is marked as loading, always show the loader first.
-    if state.loading_private_chats.contains(username) {
-        messages_column = messages_column.push(
-            Container::new(
-                Text::new("Caricamento messaggi...")
-                    .size(14)
-                    .style(TEXT_SECONDARY)
-            )
-            .width(Length::Fill)
-            .center_x()
-            .padding(20)
-        );
-    }
-    // Otherwise, show cached messages or appropriate placeholder.
-    else if let Some(chat_messages) = state.private_chats.get(username) {
+    // Show cached messages or appropriate placeholder
+    if let Some(chat_messages) = state.private_chats.get(username) {
         if chat_messages.is_empty() {
             messages_column = messages_column.push(
                 Container::new(
@@ -111,7 +98,7 @@ fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Elemen
             }
         }
     } else {
-        // Nessuna entry cached e non stiamo caricando: mostra placeholder di caricamento
+        // No cached messages: show loading placeholder
         messages_column = messages_column.push(
             Container::new(
                 Text::new("Caricamento messaggi...")

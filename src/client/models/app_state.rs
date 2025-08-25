@@ -166,28 +166,11 @@ impl ChatAppState {
                 self.app_state = AppState::PrivateChat(username.clone());
                 self.current_message_input.clear();
                 
-                // Mark this chat as loading
-                self.loading_private_chats.insert(username.clone());
-                
-                // Load messages for this chat
-                if let Some(token) = &self.session_token {
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    let username_clone = username.clone();
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    
-                    return Command::perform(
-                        async move {
-                            let mut guard = svc.lock().await;
-                            match guard.get_private_messages(&host, &token_clone, &username_clone).await {
-                                Ok(messages) => Message::PrivateMessagesLoaded { with: username_clone, messages },
-                                Err(_) => Message::PrivateMessagesLoaded { with: username_clone, messages: vec![] },
-                            }
-                        },
-                        |msg| msg,
-                    );
-                }
+                // Start message polling for real-time updates
+                return Command::perform(
+                    async move { Message::StartMessagePolling { with: username } },
+                    |msg| msg,
+                );
             }
             Message::OpenGroupChat(group_id, group_name) => {
                 self.app_state = AppState::GroupChat(group_id, group_name);
@@ -239,6 +222,7 @@ impl ChatAppState {
                                 Ok(users) => {
                                     let filtered: Vec<String> = users.into_iter()
                                         .filter(|u| u.to_lowercase().contains(&query.to_lowercase()))
+                                        .filter(|u| u != &self.username) // Remove current user from search results
                                         .collect();
                                     Message::UsersListLoaded { kind: "Search".to_string(), list: filtered }
                                 }
@@ -250,7 +234,10 @@ impl ChatAppState {
                 }
             }
             Message::UsersListLoaded { kind: _, list } => {
-                self.users_search_results = list;
+                // Filter out current user from all user lists
+                self.users_search_results = list.into_iter()
+                    .filter(|u| u != &self.username)
+                    .collect();
             }
             Message::ListOnlineUsers => {
                 return Command::perform(

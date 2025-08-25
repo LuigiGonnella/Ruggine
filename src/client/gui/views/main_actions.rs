@@ -81,18 +81,13 @@ fn action_card<'a>(icon: &'a str, title: &'a str, detail: &'a str, btn_label: &'
     let description = Text::new(detail).size(14).style(TEXT_SECONDARY);
 
     let primary_btn = Button::new(
-        Container::new(
-            Text::new(btn_label)
-                .font(BOLD_FONT)
-                .size(14)
-                .style(TEXT_PRIMARY)
-        )
-        .width(Length::Fill)
-        .center_x()
+        Text::new(btn_label)
+            .font(BOLD_FONT)
+            .size(14)
+            .style(TEXT_PRIMARY)
     )
     .style(iced::theme::Button::Primary)
     .on_press(action)
-    .width(Length::Fill)
     .padding(12);
 
     let mut content = Column::new()
@@ -100,24 +95,27 @@ fn action_card<'a>(icon: &'a str, title: &'a str, detail: &'a str, btn_label: &'
         .padding(24)
         .push(title_row)
         .push(description)
-        .push(primary_btn);
+        .push(
+            Container::new(primary_btn)
+                .width(Length::Fill)
+                .center_x()
+        );
 
     if let Some((link_label, link_msg)) = secondary {
         let secondary_btn = Button::new(
-            Container::new(
-                Text::new(link_label)
-                    .size(14)
-                    .style(TEXT_SECONDARY)
-            )
-            .width(Length::Fill)
-            .center_x()
+            Text::new(link_label)
+                .size(14)
+                .style(TEXT_SECONDARY)
         )
         .style(iced::theme::Button::Secondary)
         .on_press(link_msg)
-        .width(Length::Fill)
         .padding(10);
         
-        content = content.push(secondary_btn);
+        content = content.push(
+            Container::new(secondary_btn)
+                .width(Length::Fill)
+                .center_x()
+        );
     }
 
     Container::new(content)
