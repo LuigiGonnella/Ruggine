@@ -296,6 +296,84 @@ impl ChatAppState {
                     |msg| msg,
                 );
             }
+            Message::MyGroups => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/my_groups {}", token_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK: My groups:") {
+                                        let groups_part = response.trim_start_matches("OK: My groups:").trim();
+                                        let groups: Vec<String> = if groups_part.is_empty() {
+                                            vec![]
+                                        } else {
+                                            groups_part.split(',').map(|s| s.trim().to_string()).collect()
+                                        };
+                                        Message::GroupsListLoaded { groups }
+                                    } else {
+                                        Message::GroupsListLoaded { groups: vec![] }
+                                    }
+                                }
+                                Err(_) => Message::GroupsListLoaded { groups: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::GroupsListLoaded { groups } => {
+                // For now, if we have groups, open the first one as a demo
+                if !groups.is_empty() {
+                    let first_group = &groups[0];
+                    // Expected format: "id:name"
+                    if let Some((group_id, group_name)) = first_group.split_once(':') {
+                        return Command::perform(
+                            async move { 
+                                Message::OpenGroupChat(group_id.to_string(), group_name.to_string()) 
+                            },
+                            |msg| msg,
+                        );
+                    }
+                } else {
+                    // No groups found, maybe show a message or create one
+                    self.logger.push(LogMessage {
+                        level: LogLevel::Info,
+                        message: "Nessun gruppo trovato. Crea un gruppo per iniziare!".to_string(),
+                    });
+                }
+            }
+            Message::CreateGroup { name } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let name_clone = name.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/create_group {} {}", token_clone, name_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::LogSuccess(format!("Gruppo '{}' creato con successo!", name_clone))
+                                    } else {
+                                        Message::LogError(response)
+                                    }
+                                }
+                                Err(e) => Message::LogError(format!("Errore nella creazione del gruppo: {}", e)),
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
             Message::MessageInputChanged(input) => {
                 self.current_message_input = input;
             }

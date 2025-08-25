@@ -46,6 +46,7 @@ pub enum Message {
     ListAllUsers,
     CreateGroup { name: String },
     MyGroups,
+    GroupsListLoaded { groups: Vec<String> },
     // Group invite / membership actions
     InviteToGroup { group_id: String, username: String },
     AcceptGroupInvite { invite_id: String },
