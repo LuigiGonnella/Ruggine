@@ -114,7 +114,7 @@ pub fn parse_group_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static str
                             let formatted_time = format_timestamp(timestamp);
                             
                             messages.push(ChatMessage {
-                                sender: sender_id, // For groups, we keep the sender_id as is
+                                sender: sender_id, // For groups, we show the sender_id (could be enhanced to show username)
                                 content,
                                 timestamp,
                                 formatted_time,

@@ -154,7 +154,8 @@ impl ChatAppState {
                 // Send logout command if we have a token
                 if let Some(token) = &self.session_token {
                     let svc = chat_service.clone();
-                    let token_clone = token.clone();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                     let cfg = crate::server::config::ClientConfig::from_env();
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                     
