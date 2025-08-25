@@ -1157,10 +1157,10 @@ impl ChatAppState {
                                         Message::MyGroupsLoaded { groups: vec![] }
                                     }
                                 },
-                                Err(_) => vec![],
+                                Err(_) => Message::MyGroupsLoaded { groups: vec![] },
                             }
                         },
-                        |groups| Message::MyGroupsLoaded { groups }
+                        |groups| Message::MyGroupsLoaded { groups: vec![] }
                     );
                 } else {
                     self.logger.push(LogMessage {
@@ -1200,6 +1200,7 @@ impl ChatAppState {
                 self.loading_private_chats.remove(&with);
                 self.private_chats.insert(with, filtered_messages);
                 return Command::none();
+            }
             Message::NewGroupMessagesReceived { group_id, messages } => {
                 // Filter out messages that were sent before discard timestamp
                 let filtered_messages = if let Some(&discard_timestamp) = self.discarded_group_chats.get(&group_id) {
@@ -1210,7 +1211,6 @@ impl ChatAppState {
                 
                 self.loading_group_chats.remove(&group_id);
                 return Command::none();
-            _ => {}
             }
             Message::StopMessagePolling => {
                 self.polling_active = false;
@@ -1230,6 +1230,5 @@ impl ChatAppState {
         }
         Command::none()
         
-        Command::none()
     }
 }
