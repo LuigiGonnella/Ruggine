@@ -18,6 +18,9 @@ pub enum AppState {
     UsersList(String),
     FriendRequests,
     Chat,
+    CreateGroup,
+    MyGroups,
+    InviteToGroup { group_id: String, group_name: String },
 }
 
 impl Default for AppState {
@@ -57,6 +60,9 @@ pub struct ChatAppState {
     pub group_chats: HashMap<String, Vec<ChatMessage>>,
     pub loading_group_chats: std::collections::HashSet<String>,
     pub group_polling_active: bool,
+    pub create_group_name: String,
+    pub my_groups: Vec<(String, String, usize)>, // (id, name, member_count)
+    pub loading_groups: bool,
 }
 
 impl ChatAppState {
@@ -247,6 +253,168 @@ impl ChatAppState {
             Message::OpenFriendRequests => {
                 self.app_state = AppState::FriendRequests;
             }
+            Message::OpenCreateGroup => {
+                self.app_state = AppState::CreateGroup;
+                self.create_group_name.clear();
+            }
+            Message::OpenMyGroups => {
+                self.app_state = AppState::MyGroups;
+                self.loading_groups = true;
+                self.my_groups.clear();
+                
+                // Load user's groups
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/my_groups {}", token_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK: My groups:") {
+                                        let groups_part = response.trim_start_matches("OK: My groups:").trim();
+                                        let groups: Vec<(String, String, usize)> = if groups_part.is_empty() {
+                                            vec![]
+                                        } else {
+                                            groups_part.split(',').filter_map(|s| {
+                                                let s = s.trim();
+                                                if let Some((id, name)) = s.split_once(':') {
+                                                    // For now, set member count to 1 (will be improved with server support)
+                                                    Some((id.to_string(), name.to_string(), 1))
+                                                } else {
+                                                    None
+                                                }
+                                            }).collect()
+                                        };
+                                        Message::MyGroupsLoaded { groups }
+                                    } else {
+                                        Message::MyGroupsLoaded { groups: vec![] }
+                                    }
+                                }
+                                Err(_) => Message::MyGroupsLoaded { groups: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::OpenInviteToGroup { group_id, group_name } => {
+                self.app_state = AppState::InviteToGroup { group_id, group_name };
+                self.users_search_query.clear();
+                self.users_search_results.clear();
+                
+                // Auto-load all users for invitation
+                let svc = chat_service.clone();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                
+                return Command::perform(
+                    async move {
+                        match UsersService::list_all(&svc, &host).await {
+                            Ok(users) => Message::UsersListLoaded { kind: "Invite".to_string(), list: users },
+                            Err(_) => Message::UsersListLoaded { kind: "Invite".to_string(), list: vec![] },
+                        }
+                    },
+                    |msg| msg,
+                );
+            }
+            Message::CreateGroupInputChanged(name) => {
+                self.create_group_name = name;
+            }
+            Message::CreateGroupSubmit => {
+                if !self.create_group_name.trim().is_empty() {
+                    if let Some(token) = &self.session_token {
+                        let svc = chat_service.clone();
+                        let token_clone = token.clone();
+                        let name_clone = self.create_group_name.trim().to_string();
+                        let cfg = crate::server::config::ClientConfig::from_env();
+                        let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                        
+                        self.loading = true;
+                        
+                        return Command::perform(
+                            async move {
+                                let mut guard = svc.lock().await;
+                                match guard.send_command(&host, format!("/create_group {} {}", token_clone, name_clone)).await {
+                                    Ok(response) => {
+                                        if response.starts_with("OK:") {
+                                            // Extract group ID from response if available, otherwise use name as ID
+                                            let group_id = uuid::Uuid::new_v4().to_string(); // Temporary ID
+                                            Message::GroupCreated { group_id, group_name: name_clone }
+                                        } else {
+                                            Message::LogError(response)
+                                        }
+                                    }
+                                    Err(e) => Message::LogError(format!("Errore nella creazione del gruppo: {}", e)),
+                                }
+                            },
+                            |msg| msg,
+                        );
+                    }
+                }
+            }
+            Message::GroupCreated { group_id, group_name } => {
+                self.loading = false;
+                self.logger.push(LogMessage {
+                    level: LogLevel::Success,
+                    message: format!("Gruppo '{}' creato con successo!", group_name),
+                });
+                
+                // Navigate to the newly created group
+                return Command::perform(
+                    async move { Message::OpenGroupChat(group_id, group_name) },
+                    |msg| msg,
+                );
+            }
+            Message::MyGroupsLoaded { groups } => {
+                self.loading_groups = false;
+                self.my_groups = groups;
+            }
+            Message::InviteUserToGroup { group_id, username } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let group_id_clone = group_id.clone();
+                    let username_clone = username.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/invite {} {} {}", token_clone, username_clone, group_id_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::InviteToGroupResult { 
+                                            success: true, 
+                                            message: format!("Invito inviato a {} con successo!", username_clone) 
+                                        }
+                                    } else {
+                                        Message::InviteToGroupResult { 
+                                            success: false, 
+                                            message: response 
+                                        }
+                                    }
+                                }
+                                Err(e) => Message::InviteToGroupResult { 
+                                    success: false, 
+                                    message: format!("Errore nell'invio dell'invito: {}", e) 
+                                },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::InviteToGroupResult { success, message } => {
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message,
+                });
+            }
             Message::UsersSearchQueryChanged(query) => {
                 self.users_search_query = query;
             }
@@ -297,85 +465,16 @@ impl ChatAppState {
                 );
             }
             Message::MyGroups => {
-                if let Some(token) = &self.session_token {
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    
-                    return Command::perform(
-                        async move {
-                            let mut guard = svc.lock().await;
-                            match guard.send_command(&host, format!("/my_groups {}", token_clone)).await {
-                                Ok(response) => {
-                                    if response.starts_with("OK: My groups:") {
-                                        let groups_part = response.trim_start_matches("OK: My groups:").trim();
-                                        let groups: Vec<String> = if groups_part.is_empty() {
-                                            vec![]
-                                        } else {
-                                            groups_part.split(',').map(|s| s.trim().to_string()).collect()
-                                        };
-                                        Message::GroupsListLoaded { groups }
-                                    } else {
-                                        Message::GroupsListLoaded { groups: vec![] }
-                                    }
-                                }
-                                Err(_) => Message::GroupsListLoaded { groups: vec![] },
-                            }
-                        },
-                        |msg| msg,
-                    );
-                }
+                return Command::perform(
+                    async { Message::OpenMyGroups },
+                    |msg| msg,
+                );
             }
-            Message::GroupsListLoaded { groups } => {
-                // For now, if we have groups, open the first one as a demo
-                if !groups.is_empty() {
-                    // Clone the first group's full string to own its data, then split and clone parts
-                    let first_group_owned = groups[0].clone();
-                    // Expected format: "id:name"
-                    if let Some((group_id_part, group_name_part)) = first_group_owned.split_once(':') {
-                        let group_id_owned = group_id_part.to_string();
-                        let group_name_owned = group_name_part.to_string();
-                        return Command::perform(
-                            async move { 
-                                Message::OpenGroupChat(group_id_owned, group_name_owned)
-                            },
-                            |msg| msg,
-                        );
-                    }
-                } else {
-                    // No groups found, maybe show a message or create one
-                    self.logger.push(LogMessage {
-                        level: LogLevel::Info,
-                        message: "Nessun gruppo trovato. Crea un gruppo per iniziare!".to_string(),
-                    });
-                }
-            }
-            Message::CreateGroup { name } => {
-                if let Some(token) = &self.session_token {
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    let name_clone = name.clone();
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    
-                    return Command::perform(
-                        async move {
-                            let mut guard = svc.lock().await;
-                            match guard.send_command(&host, format!("/create_group {} {}", token_clone, name_clone)).await {
-                                Ok(response) => {
-                                    if response.starts_with("OK:") {
-                                        Message::LogSuccess(format!("Gruppo '{}' creato con successo!", name_clone))
-                                    } else {
-                                        Message::LogError(response)
-                                    }
-                                }
-                                Err(e) => Message::LogError(format!("Errore nella creazione del gruppo: {}", e)),
-                            }
-                        },
-                        |msg| msg,
-                    );
-                }
+            Message::CreateGroup { name: _ } => {
+                return Command::perform(
+                    async { Message::OpenCreateGroup },
+                    |msg| msg,
+                );
             }
             Message::MessageInputChanged(input) => {
                 self.current_message_input = input;

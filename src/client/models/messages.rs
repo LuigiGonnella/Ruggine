@@ -73,4 +73,14 @@ pub enum Message {
     StopGroupMessagePolling,
     NewGroupMessagesReceived { group_id: String, messages: Vec<crate::client::models::app_state::ChatMessage> },
     TriggerImmediateGroupRefresh { group_id: String },
+    // Group management
+    OpenCreateGroup,
+    OpenMyGroups,
+    OpenInviteToGroup { group_id: String, group_name: String },
+    CreateGroupInputChanged(String),
+    CreateGroupSubmit,
+    GroupCreated { group_id: String, group_name: String },
+    MyGroupsLoaded { groups: Vec<(String, String, usize)> }, // (id, name, member_count)
+    InviteUserToGroup { group_id: String, username: String },
+    InviteToGroupResult { success: bool, message: String },
 }

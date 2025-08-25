@@ -5,3 +5,6 @@ pub mod private_chat;
 pub mod group_chat;
 pub mod friend_requests;
 pub mod users_list;
+pub mod create_group;
+pub mod my_groups;
+pub mod invite_to_group;

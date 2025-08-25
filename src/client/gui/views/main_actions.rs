@@ -189,7 +189,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         "Open group chats and manage groups", 
         "My Groups", 
         Message::MyGroups, 
-        Some(("Create Group", Message::CreateGroup { name: "TestGroup".to_string() }))
+        Some(("Create Group", Message::CreateGroup { name: String::new() }))
     );
 
     let invites_card = action_card(
