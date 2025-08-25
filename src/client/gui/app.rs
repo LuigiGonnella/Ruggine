@@ -118,6 +118,35 @@ impl Application for ChatApp {
                 );
             }
             Msg::StartMessagePolling { with } => {
+                if !self.state.polling_active {
+                    println!("[APP] StartMessagePolling requested for {}", with);
+                    self.state.polling_active = true;
+                    let svc = self.chat_service.clone();
+                    let token = self.state.session_token.clone().unwrap_or_default();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let with_clone = with.clone();
+                    return Command::perform(
+                        async move {
+                            println!("[APP] Fetching private messages for {}", with_clone);
+                            let mut guard = svc.lock().await;
+                            match guard.get_private_messages(&host, &token, &with_clone).await {
+                                Ok(messages) => {
+                                    println!("[APP] Fetched {} private messages for {}", messages.len(), with_clone);
+                                    Msg::NewMessagesReceived { with: with_clone.clone(), messages }
+                                }
+                                Err(e) => {
+                                    println!("[APP] Private fetch failed for {}: {}", with_clone, e);
+                                    Msg::NewMessagesReceived { with: with_clone.clone(), messages: vec![] }
+                                }
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+                Command::none()
+            }
+            Msg::StartGroupMessagePolling { group_id } => {
                 if !self.state.group_polling_active {
                     println!("[APP] StartGroupMessagePolling requested for {}", group_id);
                     self.state.group_polling_active = true;
@@ -148,7 +177,7 @@ impl Application for ChatApp {
             }
             Msg::StopGroupMessagePolling => {
                 self.state.group_polling_active = false;
-                ()
+                Command::none()
             }
             Msg::NewGroupMessagesReceived { group_id, messages } => {
                 if self.state.group_polling_active {
@@ -182,6 +211,7 @@ impl Application for ChatApp {
                         |msg| msg,
                     );
                 }
+                Command::none()
             }
             Msg::TriggerImmediateGroupRefresh { group_id } => {
                 let cfg = crate::server::config::ClientConfig::from_env();
@@ -199,7 +229,7 @@ impl Application for ChatApp {
             }
             Msg::StopMessagePolling => {
                 self.state.polling_active = false;
-                ()
+                Command::none()
             }
             Msg::NewMessagesReceived { with, messages } => {
                 if self.state.polling_active {
@@ -233,9 +263,11 @@ impl Application for ChatApp {
                         |msg| msg,
                     );
                 }
+                Command::none()
             }
             Msg::TriggerImmediateRefresh { with } => {
-                let host = self.state.manual_host.clone();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                 let token = self.state.session_token.clone().unwrap_or_default();
                 let svc = self.chat_service.clone();
                     let with_cloned = with.clone();
@@ -249,7 +281,7 @@ impl Application for ChatApp {
             }
             _ => {}
         }
-    self.state.update(message.clone(), &self.chat_service)
+        self.state.update(message.clone(), &self.chat_service)
     }
 
     fn view(&self) -> Element<Message> {

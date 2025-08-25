@@ -338,7 +338,7 @@ impl ChatAppState {
                 let svc = chat_service.clone();
                 let cfg = crate::server::config::ClientConfig::from_env();
                 let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                let token = self.session_token.clone().unwrap_or_default();
+                let _host = format!("{}:{}", cfg.default_host, cfg.default_port);
                 let group_id_for_filter = group_id.clone();
                 
                 return Command::perform(
@@ -463,45 +463,6 @@ impl ChatAppState {
                         },
                         |msg| msg,
                     );
-                }
-            }
-            Message::SendFriendRequestToUser { username, message } => {
-                if let Some(token) = &self.session_token {
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    
-                    return Command::perform(
-                        async move {
-                            let mut guard = svc.lock().await;
-                            match guard.send_command(&host, format!("/send_friend_request {} {} {}", token_clone, username, message)).await {
-                                Ok(response) => {
-                                    if response.starts_with("OK:") {
-                                        Message::FriendRequestResult { 
-                                            success: true, 
-                                            message: format!("Friend request sent to {} successfully!", username) 
-                                        }
-                                    } else {
-                                        Message::FriendRequestResult { 
-                                            success: false, 
-                                            message: response 
-                                        }
-                                    }
-                                }
-                                Err(e) => Message::FriendRequestResult { 
-                                    success: false, 
-                                    message: format!("Error sending friend request: {}", e) 
-                                },
-                            }
-                        },
-                        |msg| msg,
-                    );
-                }
-            }
-            Message::AcceptFriendRequestFromUser { username } => {
-                if let Some(token) = &self.session_token {
-                    let svc = chat_service.clone();
                     let token_clone = token.clone();
                     let cfg = crate::server::config::ClientConfig::from_env();
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
