@@ -209,6 +209,17 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
         return "ERR: Not a group member".to_string();
     }
     let chat_id = format!("group:{}", group_id);
+    
+    // Check if user has deleted this chat and get the deletion timestamp
+    let deleted_at = sqlx::query("SELECT deleted_at FROM deleted_chats WHERE user_id = ? AND chat_id = ?")
+        .bind(&user_id)
+        .bind(&chat_id)
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|row| row.get::<i64, _>("deleted_at"));
+    
     let rows = sqlx::query("SELECT sender_id, message, sent_at FROM encrypted_messages WHERE chat_id = ? ORDER BY sent_at ASC")
         .bind(&chat_id)
         .fetch_all(&db.pool)
@@ -250,6 +261,13 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
                 };
                 let msg: String = r.get("message");
                 let ts: i64 = r.get("sent_at");
+                
+                // Filter out messages before deletion timestamp if user deleted this chat
+                if let Some(deleted_timestamp) = deleted_at {
+                    if ts <= deleted_timestamp {
+                        continue; // Skip this message
+                    }
+                }
                 
                 // Try multiple decryption strategies for historical messages
                 let clear = decrypt_group_message_with_fallback(&msg, &current_members, &all_historical_members, &sender_id, config);
@@ -366,6 +384,17 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
     let mut ids = vec![user_id.clone(), to_id.clone()];
     ids.sort();
     let chat_id = format!("private:{}-{}", ids[0], ids[1]);
+    
+    // Check if user has deleted this chat and get the deletion timestamp
+    let deleted_at = sqlx::query("SELECT deleted_at FROM deleted_chats WHERE user_id = ? AND chat_id = ?")
+        .bind(&user_id)
+        .bind(&chat_id)
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|row| row.get::<i64, _>("deleted_at"));
+    
     let rows = sqlx::query("SELECT sender_id, message, sent_at FROM encrypted_messages WHERE chat_id = ? ORDER BY sent_at ASC")
         .bind(&chat_id)
         .fetch_all(&db.pool)
@@ -382,6 +411,14 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
                 };
                 let msg: String = r.get("message");
                 let ts: i64 = r.get("sent_at");
+                
+                // Filter out messages before deletion timestamp if user deleted this chat
+                if let Some(deleted_timestamp) = deleted_at {
+                    if ts <= deleted_timestamp {
+                        return None; // Skip this message
+                    }
+                }
+                
                 // For private chats the participants are the two user ids we already computed in `ids`
                 let clear = match decrypt_message_from_storage(&msg, &ids, config) {
                     Ok(s) => s,
@@ -403,6 +440,28 @@ pub async fn delete_group_messages(db: Arc<Database>, session_token: &str, group
         Some(uid) => uid,
         None => return "ERR: Invalid session".to_string(),
     };
+    
+    // Insert into deleted_chats table to track user-specific deletion
+    let now = chrono::Utc::now().timestamp();
+    let chat_id = format!("group:{}", group_id);
+    let res = sqlx::query("INSERT OR REPLACE INTO deleted_chats (user_id, chat_id, deleted_at) VALUES (?, ?, ?)")
+        .bind(&user_id)
+        .bind(&chat_id)
+        .bind(now)
+        .execute(&db.pool)
+        .await;
+    
+    match res {
+        Ok(_) => {
+            println!("[MSG] Marked group messages as deleted for user {} in group {}", user_id, group_id);
+            "OK: Messages discarded for you only".to_string()
+        }
+        Err(e) => {
+            println!("[MSG] Error marking group messages as deleted: {}", e);
+            format!("ERR: {}", e)
+        }
+    }
+}
     let is_member = sqlx::query("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?")
         .bind(group_id)
         .bind(&user_id)
@@ -447,17 +506,23 @@ pub async fn delete_private_messages(db: Arc<Database>, session_token: &str, oth
     let mut ids = vec![user_id.clone(), to_id.clone()];
     ids.sort();
     let chat_id = format!("private:{}-{}", ids[0], ids[1]);
-    let res = sqlx::query("DELETE FROM encrypted_messages WHERE chat_id = ?")
+    
+    // Insert into deleted_chats table to track user-specific deletion
+    let now = chrono::Utc::now().timestamp();
+    let res = sqlx::query("INSERT OR REPLACE INTO deleted_chats (user_id, chat_id, deleted_at) VALUES (?, ?, ?)")
+        .bind(&user_id)
         .bind(&chat_id)
+        .bind(now)
         .execute(&db.pool)
         .await;
+    
     match res {
         Ok(_) => {
-            println!("[MSG] Deleted all private messages with {} by {}", other_username, user_id);
-            "OK: Messages deleted".to_string()
+            println!("[MSG] Marked private messages as deleted for user {} with {}", user_id, other_username);
+            "OK: Messages discarded for you only".to_string()
         }
         Err(e) => {
-            println!("[MSG] Error deleting private messages: {}", e);
+            println!("[MSG] Error marking private messages as deleted: {}", e);
             format!("ERR: {}", e)
         }
     }

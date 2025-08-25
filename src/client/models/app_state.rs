@@ -1126,6 +1126,23 @@ impl ChatAppState {
                         level: LogLevel::Success,
                         message: message.clone(),
                     });
+                    // Reload my groups after successful leave
+                    if let Some(token) = &self.session_token {
+                        let cfg = crate::server::config::ClientConfig::from_env();
+                        let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                        let svc = chat_service.clone();
+                        let token_clone = token.clone();
+                        return Command::perform(
+                            async move {
+                                let mut guard = svc.lock().await;
+                                match guard.send_command(&host, format!("/my_groups {}", token_clone)).await {
+                                    Ok(response) => parse_groups_response(&response),
+                                    Err(_) => Message::MyGroupsLoaded { groups: vec![] },
+                                }
+                            },
+                            |msg| msg,
+                        );
+                    }
                     // Reload groups list
                     let svc = chat_service.clone();
                     let token = self.session_token.clone().unwrap_or_default();
@@ -1170,25 +1187,70 @@ impl ChatAppState {
                 }
             }
             Message::DiscardPrivateMessages { with } => {
-                let now = chrono::Utc::now().timestamp();
-                self.discarded_private_chats.insert(with.clone(), now);
-                self.private_chats.remove(&with);
-                use crate::client::gui::views::logger::{LogMessage, LogLevel};
-                self.logger.push(LogMessage {
-                    level: LogLevel::Success,
-                    message: format!("Messages with {} discarded locally", with),
-                });
-            }
+                if let Some(token) = &self.session_token {
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let with_clone = with.clone();
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/delete_private_messages {} {}", token_clone, with_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::DiscardMessagesResult { success: true, message: "Messages discarded successfully".to_string() }
+                                    } else {
+                                        Message::DiscardMessagesResult { success: false, message: response }
+                                    }
+                                }
+                                Err(e) => Message::DiscardMessagesResult { success: false, message: format!("Error: {}", e) }
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+                Command::none()
             Message::DiscardGroupMessages { group_id } => {
-                let now = chrono::Utc::now().timestamp();
-                self.discarded_group_chats.insert(group_id.clone(), now);
-                self.group_chats.remove(&group_id);
-                use crate::client::gui::views::logger::{LogMessage, LogLevel};
-                self.logger.push(LogMessage {
-                    level: LogLevel::Success,
-                    message: "Group messages discarded locally".to_string(),
-                });
+                if let Some(token) = &self.session_token {
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let group_id_clone = group_id.clone();
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/delete_group_messages {} {}", token_clone, group_id_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::DiscardMessagesResult { success: true, message: "Group messages discarded successfully".to_string() }
+                                    } else {
+                                        Message::DiscardMessagesResult { success: false, message: response }
+                                    }
+                                }
+                                Err(e) => Message::DiscardMessagesResult { success: false, message: format!("Error: {}", e) }
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+                Command::none()
             }
+            Message::DiscardMessagesResult { success, message } => {
+                use crate::client::gui::views::logger::{LogMessage, LogLevel};
+                if success {
+                    self.logger.push(LogMessage {
+                        level: LogLevel::Success,
+                        message: message.clone(),
+                    });
+                } else {
+                    self.logger.push(LogMessage {
+                        level: LogLevel::Error,
+                        message: message.clone(),
+                    });
+                }
+                Command::none()
             Message::NewMessagesReceived { with, messages } => {
                 // Filter out messages that were sent before discard timestamp
                 let filtered_messages = if let Some(&discard_timestamp) = self.discarded_private_chats.get(&with) {
