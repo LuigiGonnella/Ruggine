@@ -31,6 +31,10 @@ pub fn view<'a>(state: &'a ChatAppState, username: &'a str) -> Element<'a, Messa
         .push(Text::new("Online").size(12).style(TEXT_SECONDARY))
         .spacing(2);
 
+    let discard_btn = Button::new(Text::new("🗑️").size(16))
+        .on_press(Message::DiscardPrivateMessages { with: username.to_string() })
+        .style(iced::theme::Button::Destructive)
+        .padding(8);
     let header = Container::new(
         Row::new()
             .spacing(12)
@@ -38,6 +42,7 @@ pub fn view<'a>(state: &'a ChatAppState, username: &'a str) -> Element<'a, Messa
             .push(back_btn)
             .push(user_info)
             .push(Space::new(Length::Fill, Length::Fixed(0.0)))
+            .push(discard_btn)
     )
     .padding([12, 16])
     .width(Length::Fill)

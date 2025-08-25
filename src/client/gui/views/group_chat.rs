@@ -30,6 +30,10 @@ pub fn view<'a>(state: &'a ChatAppState, group_id: &'a str, group_name: &'a str)
         .push(Text::new("Group Chat").size(12).style(TEXT_SECONDARY))
         .spacing(2);
 
+    let discard_btn = Button::new(Text::new("🗑️").size(16))
+        .on_press(Message::DiscardGroupMessages { group_id: group_id.to_string() })
+        .style(iced::theme::Button::Destructive)
+        .padding(8);
     let header = Container::new(
         Row::new()
             .spacing(12)
@@ -37,6 +41,7 @@ pub fn view<'a>(state: &'a ChatAppState, group_id: &'a str, group_name: &'a str)
             .push(back_btn)
             .push(group_info)
             .push(Space::new(Length::Fill, Length::Fixed(0.0)))
+            .push(discard_btn)
     )
     .padding([12, 16])
     .width(Length::Fill)

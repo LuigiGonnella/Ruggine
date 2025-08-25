@@ -229,6 +229,22 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
                             .push(
                                 Button::new(
                                     Container::new(
+                                        Text::new("🚪").font(EMOJI_FONT).size(16)
+                                    )
+                                    .width(Length::Fill)
+                                    .center_x()
+                                )
+                                .style(iced::theme::Button::Destructive)
+                                .on_press(Message::LeaveGroup { 
+                                    group_id: group_id.clone(), 
+                                    group_name: group_name.clone() 
+                                })
+                                .padding(8)
+                                .width(Length::Fixed(40.0))
+                            )
+                            .push(
+                                Button::new(
+                                    Container::new(
                                         Text::new("➕").font(EMOJI_FONT).size(16)
                                     )
                                     .width(Length::Fill)
