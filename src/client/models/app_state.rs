@@ -86,6 +86,7 @@ pub struct ChatAppState {
     pub loading_invites: bool,
     pub friends_list: Vec<String>,
     pub friend_requests: Vec<(String, String)>, // (username, message)
+    pub discarded_private_chats: std::collections::HashSet<String>,
 }
 
 impl ChatAppState {
@@ -599,80 +600,6 @@ impl ChatAppState {
                                                 if let Some(colon_pos) = item.find(':') {
                                                     let username = item[..colon_pos].trim().to_string();
                                                     let message = item[colon_pos + 1..].trim().to_string();
-            Message::LeaveGroup { group_id, group_name } => {
-                let cfg = crate::server::config::ClientConfig::from_env();
-                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                let token = self.session_token.clone().unwrap_or_default();
-                let svc = chat_service.clone();
-                let group_id_clone = group_id.clone();
-                let group_name_clone = group_name.clone();
-                
-                return Command::perform(
-                    async move {
-                        let mut guard = svc.lock().await;
-                        let cmd = format!("/leave_group {} {}", token, group_name_clone);
-                        match guard.send_command(&host, cmd).await {
-                            Ok(response) => {
-                                if response.starts_with("OK:") {
-                                    Message::LeaveGroupResult { success: true, message: format!("Left group '{}'", group_name_clone) }
-                                } else {
-                                    Message::LeaveGroupResult { success: false, message: response }
-                                }
-                            }
-                            Err(e) => Message::LeaveGroupResult { success: false, message: format!("Error: {}", e) }
-                        }
-                    },
-                    |msg| msg,
-                );
-            }
-            Message::LeaveGroupResult { success, message } => {
-                use crate::client::gui::views::logger::{LogMessage, LogLevel};
-                if *success {
-                    self.logger.push(LogMessage {
-                        level: LogLevel::Success,
-                        message: message.clone(),
-                    });
-                    // Reload groups list
-                    let svc = chat_service.clone();
-                    let token = self.session_token.clone().unwrap_or_default();
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    return Command::perform(
-                        async move {
-                            let mut guard = svc.lock().await;
-                            let cmd = format!("/my_groups {}", token);
-                            match guard.send_command(&host, cmd).await {
-                                Ok(response) => parse_groups_response(&response),
-                                Err(_) => vec![],
-                            }
-                        },
-                        |groups| Message::MyGroupsLoaded { groups }
-                    );
-                } else {
-                    self.logger.push(LogMessage {
-                        level: LogLevel::Error,
-                        message: message.clone(),
-                    });
-                }
-            }
-            Message::DiscardPrivateMessages { with } => {
-                self.discarded_private_chats.insert(with.clone());
-                self.private_chats.remove(with);
-                use crate::client::gui::views::logger::{LogMessage, LogLevel};
-                self.logger.push(LogMessage {
-                    level: LogLevel::Success,
-                    message: format!("Messages with {} discarded locally", with),
-                });
-            }
-            Message::DiscardGroupMessages { group_id } => {
-                self.discarded_group_chats.insert(group_id.clone());
-                self.group_chats.remove(group_id);
-                use crate::client::gui::views::logger::{LogMessage, LogLevel};
-                self.logger.push(LogMessage {
-                    level: LogLevel::Success,
-                    message: "Group messages discarded locally".to_string(),
-                });
-            }
                                                     Some((username, message))
                                                 } else {
                                                     None

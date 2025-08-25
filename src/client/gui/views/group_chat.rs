@@ -30,10 +30,6 @@ pub fn view<'a>(state: &'a ChatAppState, group_id: &'a str, group_name: &'a str)
         .push(Text::new("Group Chat").size(12).style(TEXT_SECONDARY))
         .spacing(2);
 
-    let discard_btn = Button::new(Text::new("🗑️").size(16))
-        .on_press(Message::DiscardGroupMessages { group_id: group_id.to_string() })
-        .style(iced::theme::Button::Destructive)
-        .padding(8);
     let header = Container::new(
         Row::new()
             .spacing(12)
@@ -41,7 +37,6 @@ pub fn view<'a>(state: &'a ChatAppState, group_id: &'a str, group_name: &'a str)
             .push(back_btn)
             .push(group_info)
             .push(Space::new(Length::Fill, Length::Fixed(0.0)))
-            .push(discard_btn)
     )
     .padding([12, 16])
     .width(Length::Fill)
@@ -80,6 +75,30 @@ pub fn view<'a>(state: &'a ChatAppState, group_id: &'a str, group_name: &'a str)
 
 fn build_messages_area<'a>(state: &'a ChatAppState, group_id: &'a str) -> Element<'a, Message> {
     let mut messages_column = Column::new().spacing(8).padding([12, 16]);
+
+    // Check if messages are discarded for this group
+    if state.discarded_group_chats.contains(group_id) {
+        messages_column = messages_column.push(
+            Container::new(
+                Text::new("Messages discarded locally. Other participants can still see them.")
+                    .size(14)
+                    .style(TEXT_SECONDARY)
+            )
+            .width(Length::Fill)
+            .center_x()
+            .padding(20)
+        );
+        return Container::new(Scrollable::new(messages_column))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(iced::theme::Container::Custom(Box::new(|_: &iced::Theme| {
+                iced::widget::container::Appearance {
+                    background: Some(iced::Background::Color(CHAT_BG)),
+                    ..Default::default()
+                }
+            })))
+            .into();
+    }
 
     // Show cached messages or appropriate placeholder
     if let Some(chat_messages) = state.group_chats.get(group_id) {
