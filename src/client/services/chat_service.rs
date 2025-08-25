@@ -1,8 +1,7 @@
 use tokio::net::TcpStream;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{sleep, Duration, timeout};
-use std::sync::Arc;
+use tokio::time::{Duration, timeout};
 use crate::client::services::message_parser;
 
 #[derive(Debug)]
@@ -304,6 +303,9 @@ impl ChatService {
     }
 }
 
+}
+
+impl ChatService {
     /// Retrieve group messages and return them parsed as Vec<ChatMessage>.
     pub async fn get_group_messages(&mut self, host: &str, session_token: &str, group_id: &str) -> anyhow::Result<Vec<crate::client::models::app_state::ChatMessage>> {
         let cmd = format!("/get_group_messages {} {}", session_token, group_id);

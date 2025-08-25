@@ -63,7 +63,7 @@ impl ChatAppState {
     pub fn update(&mut self, message: Message, chat_service: &Arc<Mutex<ChatService>>) -> Command<Message> {
         use crate::client::gui::views::logger::{LogMessage, LogLevel};
         use crate::client::utils::session_store;
-        use crate::client::services::{users_service::UsersService, friend_service::FriendService};
+        use crate::client::services::users_service::UsersService;
         
         match message {
             Message::ManualHostChanged(host) => {
