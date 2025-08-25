@@ -111,13 +111,11 @@ impl ChatAppState {
                 self.is_login = !self.is_login;
                 self.error_message = None;
             }
-                                    // Extract group_id from response: "OK: Group 'name' created with ID: uuid"
-                                    let group_id = if let Some(id_part) = response.split("ID: ").nth(1) {
-                                        id_part.trim().to_string()
-                                    } else {
-                                        // Fallback: generate a temporary ID (shouldn't happen)
-                                        format!("temp_{}", chrono::Utc::now().timestamp())
-                                    };
+            Message::AuthResult { success, message, token } => {
+                self.loading = false;
+                if success {
+            
+                                    
                     if let Some(t) = token {
                         self.session_token = Some(t.clone());
                         // Save token securely
@@ -167,6 +165,7 @@ impl ChatAppState {
                         |msg| msg,
                     );
                 }
+            
             }
             Message::SessionMissing => {
                 self.app_state = AppState::Registration;
@@ -696,15 +695,17 @@ impl ChatAppState {
                                 let participants_str = participants.into_iter().collect::<Vec<_>>().join(",");
                                 match guard.send_command(&host, format!("/create_group {} {} {}", token_clone, name_clone, participants_str)).await {
                                     Ok(response) => {
-                                        if response.starts_with("OK:") {
-                                            // Extract group ID from response if available, otherwise use name as ID
-                                            let group_id = uuid::Uuid::new_v4().to_string(); // Temporary ID
-                                            Message::GroupCreated { group_id, group_name: name_clone }
+                                        // Extract group_id from response: "OK: Group 'name' created with ID: uuid"
+                                        let group_id = if let Some(id_part) = response.split("ID: ").nth(1) {
+                                            let group_id = id_part.trim().to_string();
+                                            return Message::GroupCreated { group_id, group_name: name_clone }
                                         } else {
-                                            Message::LogError(response)
-                                        }
+                                            // Fallback: generate a temporary ID (shouldn't happen)
+                                            return Message::GroupCreated { group_id: format!("temp_{}", chrono::Utc::now().timestamp()), group_name: name_clone }
+                                        };
+                                        
                                     }
-                                    Err(e) => Message::LogError(format!("Errore nella creazione del gruppo: {}", e)),
+                                    Err(e) => return Message::LogError(format!("Errore nella creazione del gruppo: {}", e)),
                                 }
                             },
                             |msg| msg,
@@ -722,13 +723,8 @@ impl ChatAppState {
                 // Navigate to the newly created group
                 return Command::perform(
                     async move { Message::OpenGroupChat(group_id, group_name) },
-                    |msg| msg,
-                self.app_state = AppState::GroupChat(group_id.clone(), group_name.clone());
-                self.loading_group_chats.insert(group_id.clone());
-                return Command::perform(
-                    async move { () },
-                    move |_| Message::StartGroupMessagePolling { group_id: group_id.clone() }
-                );
+                    |msg| msg);
+                
             }
             Message::MyGroupsLoaded { groups } => {
                 self.loading_groups = false;

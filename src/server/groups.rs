@@ -345,16 +345,47 @@ pub async fn join_group(db: Arc<Database>, user_id: &str, group_name: &str) -> S
     }
 }
 
-pub async fn leave_group(db: Arc<Database>, user_id: &str, group_name: &str) -> String {
-    println!("[GROUPS] User {} leaves group '{}'", user_id, group_name);
-    // Trova group_id
-    let group_row = sqlx::query("SELECT id FROM groups WHERE name = ?")
-        .bind(group_name)
+pub async fn leave_group(db: Arc<Database>, user_id: &str, group_ident: &str) -> String {
+    println!("[GROUPS] User {} leaves group '{}'", user_id, group_ident);
+    // Try to resolve the provided identifier as a group id first, then fall back to name
+    let group_row_by_id = sqlx::query("SELECT id FROM groups WHERE id = ?")
+        .bind(group_ident)
         .fetch_optional(&db.pool)
         .await;
-    let group_id = match group_row {
+
+    let group_id = match group_row_by_id {
         Ok(Some(row)) => row.get::<String,_>("id"),
-        _ => return "ERR: Group not found".to_string(),
+        _ => {
+            // Fallback: try by name but prefer a group the user is actually member of
+            // This avoids ambiguity when multiple groups share the same name.
+            let group_row_by_name = sqlx::query("SELECT g.id FROM groups g JOIN group_members m ON g.id = m.group_id WHERE g.name = ? AND m.user_id = ? LIMIT 1")
+                .bind(group_ident)
+                .bind(user_id)
+                .fetch_optional(&db.pool)
+                .await;
+            match group_row_by_name {
+                Ok(Some(row)) => {
+                    let gid: String = row.get("id");
+                    println!("[GROUPS] Resolved group name '{}' to id {} (user member)", group_ident, gid);
+                    gid
+                }
+                _ => {
+                    // As a last resort, try global lookup by name (may still be ambiguous)
+                    let group_row_global = sqlx::query("SELECT id FROM groups WHERE name = ? LIMIT 1")
+                        .bind(group_ident)
+                        .fetch_optional(&db.pool)
+                        .await;
+                    match group_row_global {
+                        Ok(Some(row)) => {
+                            let gid: String = row.get("id");
+                            println!("[GROUPS] Resolved group name '{}' to id {} (global lookup)", group_ident, gid);
+                            gid
+                        }
+                        _ => return "ERR: Group not found".to_string(),
+                    }
+                }
+            }
+        }
     };
     // Rimuovi da group_members
     let res = sqlx::query("DELETE FROM group_members WHERE group_id = ? AND user_id = ?")
