@@ -165,7 +165,9 @@ impl ChatAppState {
             Message::OpenPrivateChat(username) => {
                 self.app_state = AppState::PrivateChat(username.clone());
                 self.current_message_input.clear();
-                
+                // Mark this private chat as loading so the UI shows a loader
+                self.loading_private_chats.insert(username.clone());
+
                 // Start message polling for real-time updates
                 return Command::perform(
                     async move { Message::StartMessagePolling { with: username } },
@@ -214,7 +216,9 @@ impl ChatAppState {
                     let cfg = crate::server::config::ClientConfig::from_env();
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                     let query = self.users_search_query.clone();
-                    
+                    // Clone current username so the async block does not borrow &self
+                    let current_username = self.username.clone();
+
                     return Command::perform(
                         async move {
                             // For now, just return all users and filter client-side
@@ -222,7 +226,7 @@ impl ChatAppState {
                                 Ok(users) => {
                                     let filtered: Vec<String> = users.into_iter()
                                         .filter(|u| u.to_lowercase().contains(&query.to_lowercase()))
-                                        .filter(|u| u != &self.username) // Remove current user from search results
+                                        .filter(|u| u != &current_username) // Remove current user from search results
                                         .collect();
                                     Message::UsersListLoaded { kind: "Search".to_string(), list: filtered }
                                 }
@@ -265,6 +269,11 @@ impl ChatAppState {
                         let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                         
                         // Clear input immediately for better UX
+                        // If we don't have the chat history cached yet, mark it as loading
+                        if !self.private_chats.contains_key(&to) {
+                            self.loading_private_chats.insert(to.clone());
+                        }
+
                         self.current_message_input.clear();
                         
                         return Command::batch([
