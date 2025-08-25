@@ -54,6 +54,9 @@ pub struct ChatAppState {
     pub private_chats: HashMap<String, Vec<ChatMessage>>,
     pub loading_private_chats: std::collections::HashSet<String>,
     pub polling_active: bool,
+    pub group_chats: HashMap<String, Vec<ChatMessage>>,
+    pub loading_group_chats: std::collections::HashSet<String>,
+    pub group_polling_active: bool,
 }
 
 impl ChatAppState {
@@ -204,7 +207,16 @@ impl ChatAppState {
                 );
             }
             Message::OpenGroupChat(group_id, group_name) => {
-                self.app_state = AppState::GroupChat(group_id, group_name);
+                self.app_state = AppState::GroupChat(group_id.clone(), group_name.clone());
+                self.current_message_input.clear();
+                // Mark this group chat as loading so the UI shows a loader
+                self.loading_group_chats.insert(group_id.clone());
+
+                // Start message polling for real-time updates
+                return Command::perform(
+                    async move { Message::StartGroupMessagePolling { group_id } },
+                    |msg| msg,
+                );
             }
             Message::OpenUsersList { kind } => {
                 self.app_state = AppState::UsersList(kind.clone());
@@ -320,6 +332,76 @@ impl ChatAppState {
                                 scrollable::RelativeOffset::END
                             )
                         ]);
+                    }
+                }
+            }
+            Message::SendGroupMessage { group_id } => {
+                if !self.current_message_input.trim().is_empty() {
+                    if let Some(token) = &self.session_token {
+                        let svc = chat_service.clone();
+                        let token_clone = token.clone();
+                        let group_id_clone = group_id.clone();
+                        let message = self.current_message_input.trim().to_string();
+                        let cfg = crate::server::config::ClientConfig::from_env();
+                        let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                        
+                        // Clear input immediately for better UX
+                        // If we don't have the chat history cached yet, mark it as loading
+                        if !self.group_chats.contains_key(&group_id) {
+                            self.loading_group_chats.insert(group_id.clone());
+                        }
+
+                        self.current_message_input.clear();
+                        
+                        return Command::batch([
+                            Command::perform(
+                                async move {
+                                    let mut guard = svc.lock().await;
+                                    let _ = guard.send_group_message(&host, &token_clone, &group_id_clone, &message).await;
+                                    Message::TriggerImmediateGroupRefresh { group_id: group_id_clone }
+                                },
+                                |msg| msg,
+                            ),
+                            // Auto-scroll to bottom after sending
+                            scrollable::snap_to(
+                                scrollable::Id::new("group_messages_scroll"),
+                                scrollable::RelativeOffset::END
+                            )
+                        ]);
+                    }
+                }
+            }
+            Message::LoadGroupMessages { group_id } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let group_id_clone = group_id.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.get_group_messages(&host, &token_clone, &group_id_clone).await {
+                                Ok(messages) => Message::GroupMessagesLoaded { group_id: group_id_clone, messages },
+                                Err(_) => Message::GroupMessagesLoaded { group_id: group_id_clone, messages: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::GroupMessagesLoaded { group_id, messages } => {
+                self.group_chats.insert(group_id.clone(), messages);
+                self.loading_group_chats.remove(&group_id);
+                
+                // Auto-scroll to bottom when messages are loaded
+                if let AppState::GroupChat(current_group_id, _) = &self.app_state {
+                    if current_group_id == &group_id {
+                        return scrollable::snap_to(
+                            scrollable::Id::new("group_messages_scroll"),
+                            scrollable::RelativeOffset::END
+                        );
                     }
                 }
             }

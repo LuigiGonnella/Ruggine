@@ -80,3 +80,56 @@ fn format_timestamp(timestamp: i64) -> String {
     // Format as HH:MM
     local_dt.format("%H:%M").to_string()
 }
+
+/// Parse group messages from server response into ChatMessage structs
+pub fn parse_group_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static str> {
+    let trimmed = resp.trim();
+    if !trimmed.starts_with("OK: Messages:") {
+        return Err("unexpected response format");
+    }
+    
+    let mut parts = trimmed.splitn(2, '\n');
+    parts.next(); // skip the OK header
+    
+    if let Some(body) = parts.next() {
+        let mut messages = Vec::new();
+        
+        for line in body.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            
+            // Expected format: [timestamp] sender_id: message
+            if let Some(bracket_end) = line.find(']') {
+                if line.starts_with('[') {
+                    let timestamp_str = &line[1..bracket_end];
+                    let rest = &line[bracket_end + 1..].trim();
+                    
+                    if let Some(colon_pos) = rest.find(':') {
+                        let sender_id = rest[..colon_pos].trim().to_string();
+                        let content = rest[colon_pos + 1..].trim().to_string();
+                        
+                        if let Ok(timestamp) = timestamp_str.parse::<i64>() {
+                            let formatted_time = format_timestamp(timestamp);
+                            
+                            messages.push(ChatMessage {
+                                sender: sender_id, // For groups, we keep the sender_id as is
+                                content,
+                                timestamp,
+                                formatted_time,
+                                sent_at: timestamp,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Sort by timestamp to ensure chronological order
+        messages.sort_by_key(|m| m.timestamp);
+        Ok(messages)
+    } else {
+        Ok(vec![])
+    }
+}
