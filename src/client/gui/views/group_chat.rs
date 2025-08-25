@@ -138,9 +138,9 @@ fn create_message_bubble<'a>(msg: &'a crate::client::models::app_state::ChatMess
     let message_header = if !is_my_message {
         Some(
             Text::new(&msg.sender)
-                .size(12)
+                .size(15)
                 .font(BOLD_FONT)
-                .style(Color::from_rgb(0.9, 0.9, 0.9))
+                .style(Color::from_rgb(1.0, 1.0, 0.8)) // Slightly warm white for better visibility
         )
     } else {
         None

@@ -32,6 +32,21 @@ impl Default for AppState {
     }
 }
 
+// Helper function to extract username from friend request action messages
+fn extract_username_from_friend_action(message: &str) -> Option<String> {
+    // Try to extract username from success messages like "Friend request accepted from username"
+    if message.contains("accepted from") {
+        if let Some(username) = message.split("accepted from ").nth(1) {
+            return Some(username.trim().to_string());
+        }
+    }
+    if message.contains("rejected from") {
+        if let Some(username) = message.split("rejected from ").nth(1) {
+            return Some(username.trim().to_string());
+        }
+    }
+    None
+}
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
     pub sender: String,
@@ -141,6 +156,50 @@ impl ChatAppState {
                         level: LogLevel::Error,
                         message: message.clone(),
                     });
+                    // Remove the processed friend request from the list immediately
+                    // This ensures the UI updates instantly without waiting for reload
+                    // The message will be parsed to extract the username that was processed
+                    if let Some(processed_username) = extract_username_from_friend_action(message) {
+                        self.friend_requests.retain(|(username, _)| username != &processed_username);
+                    }
+                    // Reload friend requests to remove the processed one
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let token = self.session_token.clone().unwrap_or_default();
+                    let svc = chat_service.clone();
+                    return iced::Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            let cmd = format!("/received_friend_requests {}", token);
+                            match guard.send_command(&host, cmd).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        // Parse the response to extract friend requests
+                                        let after = response.splitn(3, ':').nth(2).unwrap_or("");
+                                        let requests: Vec<(String, String)> = after
+                                            .split('|')
+                                            .filter_map(|item| {
+                                                let item = item.trim();
+                                                if item.is_empty() { return None; }
+                                                if let Some(colon_pos) = item.find(':') {
+                                                    let username = item[..colon_pos].trim().to_string();
+                                                    let message = item[colon_pos + 1..].trim().to_string();
+                                                    Some((username, message))
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect();
+                                        Msg::FriendRequestsLoaded { requests }
+                                    } else {
+                                        Msg::FriendRequestsLoaded { requests: vec![] }
+                                    }
+                                }
+                                Err(_) => Msg::FriendRequestsLoaded { requests: vec![] }
+                            }
+                        },
+                        |msg| msg,
+                    );
                     // Reload friend requests to update the UI
                     if let Some(token) = &self.session_token {
                         let cfg = crate::server::config::ClientConfig::from_env();
