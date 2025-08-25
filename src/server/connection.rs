@@ -213,10 +213,12 @@ impl Server {
                 let exclude = None;
                 users::list_all(self.db.clone(), exclude).await
             }
-            "/create_group" if args.len() == 2 => {
+            "/create_group" if args.len() >= 2 => {
                 let session_token = args[0];
+                let group_name = args[1];
+                let participants = if args.len() > 2 { Some(args[2]) } else { None };
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
-                    groups::create_group(self.db.clone(), &uid, args[1]).await
+                    groups::create_group_with_participants(self.db.clone(), &uid, group_name, participants).await
                 } else {
                     "ERR: Invalid or expired session".to_string()
                 }
@@ -229,26 +231,30 @@ impl Server {
                     "ERR: Invalid or expired session".to_string()
                 }
             }
-            "/invite_to_group" if args.len() == 3 => {
+            "/invite" if args.len() == 3 => {
                 let session_token = args[0];
+                let username = args[1];
+                let group_id = args[2];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
-                    groups::invite(self.db.clone(), &uid, args[1], args[2]).await
+                    groups::invite_user_to_group(self.db.clone(), &uid, username, group_id).await
                 } else {
                     "ERR: Invalid or expired session".to_string()
                 }
             }
-            "/accept_group_invite" if args.len() == 2 => {
+            "/accept_group_invite" if args.len() >= 2 => {
                 let session_token = args[0];
+                let invite_id = args[1];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
-                    groups::accept_invite(self.db.clone(), &uid, args[1]).await
+                    groups::accept_invite(self.db.clone(), &uid, invite_id).await
                 } else {
                     "ERR: Invalid or expired session".to_string()
                 }
             }
-            "/reject_group_invite" if args.len() == 2 => {
+            "/reject_group_invite" if args.len() >= 2 => {
                 let session_token = args[0];
+                let invite_id = args[1];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
-                    groups::reject_invite(self.db.clone(), &uid, args[1]).await
+                    groups::reject_invite(self.db.clone(), &uid, invite_id).await
                 } else {
                     "ERR: Invalid or expired session".to_string()
                 }
@@ -257,6 +263,15 @@ impl Server {
                 let session_token = args[0];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
                     groups::my_invites(self.db.clone(), &uid).await
+                } else {
+                    "ERR: Invalid or expired session".to_string()
+                }
+            }
+            "/group_members" if args.len() == 2 => {
+                let session_token = args[0];
+                let group_id = args[1];
+                if let Some(_uid) = auth::validate_session(self.db.clone(), session_token).await {
+                    groups::get_group_members(self.db.clone(), group_id).await
                 } else {
                     "ERR: Invalid or expired session".to_string()
                 }
@@ -293,7 +308,7 @@ impl Server {
             "/get_group_messages" if args.len() == 2 => {
                 let session_token = args[0];
                 let group_name = args[1];
-                messages::get_group_messages(self.db.clone(), session_token, group_name).await
+                messages::get_group_messages(self.db.clone(), session_token, group_name, &self.config).await
             }
             "/get_private_messages" if args.len() == 2 => {
                 let session_token = args[0];

@@ -1,8 +1,7 @@
 use tokio::net::TcpStream;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{sleep, Duration, timeout};
-use std::sync::Arc;
+use tokio::time::{Duration, timeout};
 use crate::client::services::message_parser;
 
 #[derive(Debug)]
@@ -287,12 +286,31 @@ impl ChatService {
     }
 
     /// Retrieve private messages with another user and return them parsed as Vec<String>.
-    pub async fn get_private_messages(&mut self, host: &str, session_token: &str, with: &str) -> anyhow::Result<Vec<String>> {
+    pub async fn get_private_messages(&mut self, host: &str, session_token: &str, with: &str) -> anyhow::Result<Vec<crate::client::models::app_state::ChatMessage>> {
         let cmd = format!("/get_private_messages {} {}", session_token, with);
         let resp = self.send_multiline_command(host, cmd).await?;
-        println!("[CLIENT:SVC] Raw response from server: {:?}", resp);
-        let msgs = message_parser::parse_messages(&resp).map_err(|e| anyhow::anyhow!(e))?;
-        println!("[CLIENT:SVC] Parsed messages: {:?}", msgs);
+        let msgs = message_parser::parse_private_messages(&resp).map_err(|e| anyhow::anyhow!(e))?;
+        Ok(msgs)
+    }
+
+    /// Send a group message using the existing send_command implementation.
+    /// Returns the raw server response.
+    pub async fn send_group_message(&mut self, host: &str, session_token: &str, group_id: &str, msg: &str) -> anyhow::Result<String> {
+        // server expects /send_group_message
+        let cmd = format!("/send_group_message {} {} {}", session_token, group_id, msg);
+        let resp = self.send_command(host, cmd).await?;
+        Ok(resp)
+    }
+}
+
+
+
+impl ChatService {
+    /// Retrieve group messages and return them parsed as Vec<ChatMessage>.
+    pub async fn get_group_messages(&mut self, host: &str, session_token: &str, group_id: &str) -> anyhow::Result<Vec<crate::client::models::app_state::ChatMessage>> {
+        let cmd = format!("/get_group_messages {} {}", session_token, group_id);
+        let resp = self.send_multiline_command(host, cmd).await?;
+        let msgs = message_parser::parse_group_messages(&resp).map_err(|e| anyhow::anyhow!(e))?;
         Ok(msgs)
     }
 }

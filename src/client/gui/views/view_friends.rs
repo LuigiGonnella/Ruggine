@@ -8,8 +8,6 @@ use crate::client::gui::views::logger::logger_view;
 const BG_MAIN: Color = Color::from_rgb(0.06, 0.07, 0.18);
 const CARD_BG: Color = Color::from_rgb(0.18, 0.19, 0.36);
 const INPUT_BG: Color = Color::from_rgb(0.12, 0.13, 0.26);
-const ACCENT_COLOR: Color = Color::from_rgb(0.0, 0.7, 0.3);
-const DANGER_COLOR: Color = Color::from_rgb(0.9, 0.3, 0.3);
 const TEXT_PRIMARY: Color = Color::WHITE;
 const TEXT_SECONDARY: Color = Color::from_rgb(0.7, 0.7, 0.7);
 
@@ -55,7 +53,7 @@ fn header_appearance(_: &iced::Theme) -> iced::widget::container::Appearance {
     }
 }
 
-fn request_item_appearance(_: &iced::Theme) -> iced::widget::container::Appearance {
+fn friend_item_appearance(_: &iced::Theme) -> iced::widget::container::Appearance {
     iced::widget::container::Appearance {
         background: Some(iced::Background::Color(CARD_BG)),
         text_color: Some(TEXT_PRIMARY),
@@ -130,10 +128,10 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
             Row::new()
                 .spacing(8)
                 .align_items(Alignment::Center)
-                .push(Text::new("📨").font(EMOJI_FONT).size(24))
-                .push(Text::new("Friend Requests").font(BOLD_FONT).size(24).style(TEXT_PRIMARY))
+                .push(Text::new("🧑‍🤝‍🧑").font(EMOJI_FONT).size(24))
+                .push(Text::new("My Friends").font(BOLD_FONT).size(24).style(TEXT_PRIMARY))
         )
-        .push(Text::new("Accept or reject friend requests").size(14).style(TEXT_SECONDARY));
+        .push(Text::new("Your current friends list").size(14).style(TEXT_SECONDARY));
 
     let header_row = Row::new()
         .spacing(16)
@@ -155,33 +153,51 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
                 .spacing(16)
                 .align_items(Alignment::Center)
                 .push(Text::new("⏳").font(EMOJI_FONT).size(32).style(TEXT_SECONDARY))
-                .push(Text::new("Loading friend requests...").font(BOLD_FONT).size(16).style(TEXT_SECONDARY))
-                .push(Text::new("Please wait while we fetch your friend requests").size(14).style(TEXT_SECONDARY))
+                .push(Text::new("Loading friends...").font(BOLD_FONT).size(16).style(TEXT_SECONDARY))
+                .push(Text::new("Please wait while we fetch your friends list").size(14).style(TEXT_SECONDARY))
         )
         .width(Length::Fill)
         .center_x()
         .padding(40)
-    } else if state.friend_requests.is_empty() {
+    } else if state.friends_list.is_empty() {
         // Empty state
         Container::new(
             Column::new()
                 .spacing(16)
                 .align_items(Alignment::Center)
-                .push(Text::new("📨").font(EMOJI_FONT).size(48).style(TEXT_SECONDARY))
-                .push(Text::new("No friend requests").font(BOLD_FONT).size(20).style(TEXT_SECONDARY))
-                .push(Text::new("You don't have any pending friend requests.").size(14).style(TEXT_SECONDARY))
-                .push(Text::new("When someone sends you a friend request, you'll see it here!").size(14).style(TEXT_SECONDARY))
+                .push(Text::new("🧑‍🤝‍🧑").font(EMOJI_FONT).size(48).style(TEXT_SECONDARY))
+                .push(Text::new("No friends yet").font(BOLD_FONT).size(20).style(TEXT_SECONDARY))
+                .push(Text::new("You don't have any friends yet.").size(14).style(TEXT_SECONDARY))
+                .push(Text::new("Send friend requests to connect with other users!").size(14).style(TEXT_SECONDARY))
+                .push(Space::new(Length::Fill, Length::Fixed(16.0)))
+                .push(
+                    Button::new(
+                        Container::new(
+                            Row::new()
+                                .spacing(8)
+                                .align_items(Alignment::Center)
+                                .push(Text::new("➕").font(EMOJI_FONT).size(16))
+                                .push(Text::new("Send Friend Request").font(BOLD_FONT).size(14))
+                        )
+                        .width(Length::Fill)
+                        .center_x()
+                    )
+                    .style(iced::theme::Button::Primary)
+                    .on_press(Message::OpenSendFriendRequest)
+                    .padding(12)
+                    .width(Length::Fixed(200.0))
+                )
         )
         .width(Length::Fill)
         .center_x()
         .padding(40)
         .style(iced::theme::Container::Custom(Box::new(empty_state_appearance)))
     } else {
-        // Friend requests list
-        let mut requests_column = Column::new().spacing(12);
+        // Friends list
+        let mut friends_column = Column::new().spacing(12);
         
-        for (username, message) in &state.friend_requests {
-            let request_item = Container::new(
+        for friend_username in &state.friends_list {
+            let friend_item = Container::new(
                 Row::new()
                     .spacing(16)
                     .align_items(Alignment::Center)
@@ -204,62 +220,37 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
                     .push(
                         Column::new()
                             .spacing(4)
-                            .push(Text::new(username).font(BOLD_FONT).size(16).style(TEXT_PRIMARY))
-                            .push(
-                                Text::new(if message.is_empty() { "Friend request" } else { message })
-                                    .size(12)
-                                    .style(TEXT_SECONDARY)
-                            )
+                            .push(Text::new(friend_username).font(BOLD_FONT).size(16).style(TEXT_PRIMARY))
+                            .push(Text::new("Friend").size(12).style(TEXT_SECONDARY))
                     )
                     .push(Space::new(Length::Fill, Length::Fixed(0.0)))
                     .push(
-                        Row::new()
-                            .spacing(8)
-                            .push(
-                                Button::new(
-                                    Container::new(
-                                        Row::new()
-                                            .spacing(6)
-                                            .align_items(Alignment::Center)
-                                            .push(Text::new("❌").font(EMOJI_FONT).size(14))
-                                            .push(Text::new("Reject").font(BOLD_FONT).size(12))
-                                    )
-                                    .width(Length::Fill)
-                                    .center_x()
-                                )
-                                .style(iced::theme::Button::Destructive)
-                                .on_press(Message::RejectFriendRequestFromUser { username: username.clone() })
-                                .padding(10)
-                                .width(Length::Fixed(80.0))
+                        Button::new(
+                            Container::new(
+                                Row::new()
+                                    .spacing(6)
+                                    .align_items(Alignment::Center)
+                                    .push(Text::new("💬").font(EMOJI_FONT).size(14))
+                                    .push(Text::new("Message").font(BOLD_FONT).size(12))
                             )
-                            .push(
-                                Button::new(
-                                    Container::new(
-                                        Row::new()
-                                            .spacing(6)
-                                            .align_items(Alignment::Center)
-                                            .push(Text::new("✅").font(EMOJI_FONT).size(14))
-                                            .push(Text::new("Accept").font(BOLD_FONT).size(12))
-                                    )
-                                    .width(Length::Fill)
-                                    .center_x()
-                                )
-                                .style(iced::theme::Button::Primary)
-                                .on_press(Message::AcceptFriendRequestFromUser { username: username.clone() })
-                                .padding(10)
-                                .width(Length::Fixed(80.0))
-                            )
+                            .width(Length::Fill)
+                            .center_x()
+                        )
+                        .style(iced::theme::Button::Primary)
+                        .on_press(Message::OpenPrivateChat(friend_username.clone()))
+                        .padding(10)
+                        .width(Length::Fixed(100.0))
                     )
             )
             .padding(16)
             .width(Length::Fill)
-            .style(iced::theme::Container::Custom(Box::new(request_item_appearance)));
+            .style(iced::theme::Container::Custom(Box::new(friend_item_appearance)));
             
-            requests_column = requests_column.push(request_item);
+            friends_column = friends_column.push(friend_item);
         }
 
         Container::new(
-            Scrollable::new(requests_column)
+            Scrollable::new(friends_column)
                 .width(Length::Fill)
                 .height(Length::Fill)
         )

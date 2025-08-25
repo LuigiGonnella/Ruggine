@@ -1,17 +1,16 @@
-use iced::{Element, Length, Alignment, Color};
-use iced::widget::{Column, Row, Text, Button, Container, TextInput, Scrollable, Space};
+use iced::{Element, Length, Alignment, Color, Font};
+use iced::widget::{Column, Row, Text, TextInput, Button, Container, Space, Scrollable};
 use crate::client::models::messages::Message;
 use crate::client::models::app_state::ChatAppState;
+use crate::client::gui::views::logger::logger_view;
 
-// Modern color palette consistent with registration.rs and main_actions.rs
+// Modern color palette consistent with other views
 const BG_MAIN: Color = Color::from_rgb(0.06, 0.07, 0.18);
 const CARD_BG: Color = Color::from_rgb(0.18, 0.19, 0.36);
 const INPUT_BG: Color = Color::from_rgb(0.12, 0.13, 0.26);
-const ACCENT_COLOR: Color = Color::from_rgb(0.0, 0.7, 0.3);
 const TEXT_PRIMARY: Color = Color::WHITE;
 const TEXT_SECONDARY: Color = Color::from_rgb(0.7, 0.7, 0.7);
 
-use iced::Font;
 const EMOJI_FONT: Font = Font::with_name("Segoe UI Emoji");
 const BOLD_FONT: Font = Font {
     family: iced::font::Family::SansSerif,
@@ -105,7 +104,23 @@ fn user_item_appearance(_: &iced::Theme) -> iced::widget::container::Appearance 
     }
 }
 
-pub fn view<'a>(state: &'a ChatAppState, kind: &'a str) -> Element<'a, Message> {
+pub fn view(state: &ChatAppState) -> Element<Message> {
+    // Top logger bar
+    let logger_bar = if !state.logger.is_empty() {
+        Container::new(logger_view(&state.logger))
+            .width(Length::Fill)
+            .padding([8, 12, 0, 12])
+            .style(iced::theme::Container::Custom(Box::new(|_: &iced::Theme| {
+                iced::widget::container::Appearance {
+                    background: Some(iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.8))),
+                    ..Default::default()
+                }
+            })))
+    } else {
+        Container::new(Space::new(Length::Fill, Length::Fixed(0.0)))
+            .width(Length::Fill)
+    };
+
     // Modern header with back button and title
     let back_button = Button::new(
         Container::new(
@@ -130,10 +145,10 @@ pub fn view<'a>(state: &'a ChatAppState, kind: &'a str) -> Element<'a, Message> 
             Row::new()
                 .spacing(8)
                 .align_items(Alignment::Center)
-                .push(Text::new("👥").font(EMOJI_FONT).size(24))
-                .push(Text::new(format!("{} Users", kind)).font(BOLD_FONT).size(24).style(TEXT_PRIMARY))
+                .push(Text::new("🧑‍🤝‍🧑").font(EMOJI_FONT).size(24))
+                .push(Text::new("Send Friend Request").font(BOLD_FONT).size(24).style(TEXT_PRIMARY))
         )
-        .push(Text::new("Find and connect with users").size(14).style(TEXT_SECONDARY));
+        .push(Text::new("Find users and send friend requests").size(14).style(TEXT_SECONDARY));
 
     let header_row = Row::new()
         .spacing(16)
@@ -147,11 +162,11 @@ pub fn view<'a>(state: &'a ChatAppState, kind: &'a str) -> Element<'a, Message> 
         .width(Length::Fill)
         .style(iced::theme::Container::Custom(Box::new(header_appearance)));
 
-    // Modern search section
+    // Search section
     let search_input_field = Container::new(
         TextInput::new("Search username...", &state.users_search_query)
             .on_input(Message::UsersSearchQueryChanged)
-            .on_submit(Message::UsersSearch) // Make submittable with Enter key
+            .on_submit(Message::UsersSearch)
             .padding(12)
             .size(14)
             .width(Length::Fill)
@@ -189,14 +204,14 @@ pub fn view<'a>(state: &'a ChatAppState, kind: &'a str) -> Element<'a, Message> 
                     .spacing(8)
                     .align_items(Alignment::Center)
                     .push(Text::new("🔍").font(EMOJI_FONT).size(18))
-                    .push(Text::new("Search Users").font(BOLD_FONT).size(16).style(TEXT_PRIMARY))
+                    .push(Text::new("Find Users").font(BOLD_FONT).size(16).style(TEXT_PRIMARY))
             )
             .push(search_row)
     )
     .width(Length::Fill)
     .style(iced::theme::Container::Custom(Box::new(search_container_appearance)));
 
-    // Modern results list
+    // Results list
     let mut list_col = Column::new().spacing(8);
     if state.users_search_results.is_empty() {
         list_col = list_col.push(
@@ -204,7 +219,7 @@ pub fn view<'a>(state: &'a ChatAppState, kind: &'a str) -> Element<'a, Message> 
                 Column::new()
                     .spacing(8)
                     .align_items(Alignment::Center)
-                    .push(Text::new("🔍").font(EMOJI_FONT).size(32).style(TEXT_SECONDARY))
+                    .push(Text::new("👥").font(EMOJI_FONT).size(32).style(TEXT_SECONDARY))
                     .push(Text::new("No users found").font(BOLD_FONT).size(16).style(TEXT_SECONDARY))
                     .push(Text::new("Try searching for a different username").size(14).style(TEXT_SECONDARY))
             )
@@ -217,7 +232,7 @@ pub fn view<'a>(state: &'a ChatAppState, kind: &'a str) -> Element<'a, Message> 
             let user_item = Container::new(
                 Row::new()
                     .spacing(16)
-                .align_items(Alignment::Center)
+                    .align_items(Alignment::Center)
                     .push(
                         Container::new(
                             Text::new("👤").font(EMOJI_FONT).size(20)
@@ -247,16 +262,19 @@ pub fn view<'a>(state: &'a ChatAppState, kind: &'a str) -> Element<'a, Message> 
                                 Row::new()
                                     .spacing(6)
                                     .align_items(Alignment::Center)
-                                    .push(Text::new("💬").font(EMOJI_FONT).size(14))
-                                    .push(Text::new("Message").font(BOLD_FONT).size(12))
+                                    .push(Text::new("🧑‍🤝‍🧑").font(EMOJI_FONT).size(14))
+                                    .push(Text::new("Add Friend").font(BOLD_FONT).size(12))
                             )
                             .width(Length::Fill)
                             .center_x()
                         )
                         .style(iced::theme::Button::Primary)
-                        .on_press(Message::OpenPrivateChat(username.clone()))
+                        .on_press(Message::SendFriendRequestToUser { 
+                            username: username.clone(), 
+                            message: "Hi! Let's be friends!".to_string() 
+                        })
                         .padding(10)
-                        .width(Length::Fixed(100.0))
+                        .width(Length::Fixed(120.0))
                     )
             )
             .padding(16)
@@ -276,7 +294,7 @@ pub fn view<'a>(state: &'a ChatAppState, kind: &'a str) -> Element<'a, Message> 
                     .spacing(8)
                     .align_items(Alignment::Center)
                     .push(Text::new("📋").font(EMOJI_FONT).size(18))
-                    .push(Text::new("Search Results").font(BOLD_FONT).size(16).style(TEXT_PRIMARY))
+                    .push(Text::new("Available Users").font(BOLD_FONT).size(16).style(TEXT_PRIMARY))
                     .push(Space::new(Length::Fill, Length::Fixed(0.0)))
                     .push(
                         Container::new(
@@ -306,7 +324,7 @@ pub fn view<'a>(state: &'a ChatAppState, kind: &'a str) -> Element<'a, Message> 
     .width(Length::Fill)
     .height(Length::Fill);
 
-    // Main content layout
+    // Main content layout with logger overlay
     let content = Column::new()
         .push(header)
         .push(Space::new(Length::Fill, Length::Fixed(16.0)))
@@ -320,7 +338,14 @@ pub fn view<'a>(state: &'a ChatAppState, kind: &'a str) -> Element<'a, Message> 
         .width(Length::Fill)
         .height(Length::Fill);
 
-    Container::new(content)
+    // Main layout with logger overlay using Column
+    let final_content = Column::new()
+        .push(logger_bar)
+        .push(content)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    Container::new(final_content)
         .width(Length::Fill)
         .height(Length::Fill)
         .style(iced::theme::Container::Custom(Box::new(bg_main_appearance)))

@@ -46,17 +46,57 @@ pub enum Message {
     ListAllUsers,
     CreateGroup { name: String },
     MyGroups,
+    GroupsListLoaded { groups: Vec<String> },
     // Group invite / membership actions
     InviteToGroup { group_id: String, username: String },
-    AcceptGroupInvite { invite_id: String },
-    RejectGroupInvite { invite_id: String },
     MyGroupInvites,
     JoinGroup { group_id: String },
     LeaveGroup { group_id: String },
     // Private chat messages
-    StartPrivateChat(String), // username to start chat with
-    PrivateMessageChanged(String), // text input changed
-    SendPrivateMessage(String), // username to send message to
-    PrivateMessagesLoaded { with_user: String, messages: Vec<String> },
-    LoadPrivateMessages(String), // username to load messages from
+    MessageInputChanged(String),
+    SendPrivateMessage { to: String },
+    LoadPrivateMessages { with: String },
+    PrivateMessagesLoaded { with: String, messages: Vec<crate::client::models::app_state::ChatMessage> },
+    // Real-time message updates
+    StartMessagePolling { with: String },
+    StopMessagePolling,
+    NewMessagesReceived { with: String, messages: Vec<crate::client::models::app_state::ChatMessage> },
+    TriggerImmediateRefresh { with: String },
+    // Group chat messages
+    SendGroupMessage { group_id: String },
+    LoadGroupMessages { group_id: String },
+    GroupMessagesLoaded { group_id: String, messages: Vec<crate::client::models::app_state::ChatMessage> },
+    // Real-time group message updates
+    StartGroupMessagePolling { group_id: String },
+    StopGroupMessagePolling,
+    NewGroupMessagesReceived { group_id: String, messages: Vec<crate::client::models::app_state::ChatMessage> },
+    TriggerImmediateGroupRefresh { group_id: String },
+    // Group management
+    OpenCreateGroup,
+    OpenMyGroups,
+    OpenInviteToGroup { group_id: String, group_name: String },
+    CreateGroupInputChanged(String),
+    CreateGroupSubmit,
+    GroupCreated { group_id: String, group_name: String },
+    // Participant selection for group creation
+    ToggleParticipant(String),
+    RemoveParticipant(String),
+    MyGroupsLoaded { groups: Vec<(String, String, usize)> }, // (id, name, member_count)
+    InviteUserToGroup { group_id: String, username: String },
+    InviteToGroupResult { success: bool, message: String },
+    // Group invites management
+    OpenMyGroupInvites,
+    MyGroupInvitesLoaded { invites: Vec<(i64, String, String)> }, // (invite_id, group_name, invited_by)
+    AcceptGroupInvite { invite_id: i64 },
+    RejectGroupInvite { invite_id: i64 },
+    GroupInviteActionResult { success: bool, message: String },
+    // Friend system
+    OpenSendFriendRequest,
+    OpenViewFriends,
+    SendFriendRequestToUser { username: String, message: String },
+    AcceptFriendRequestFromUser { username: String },
+    RejectFriendRequestFromUser { username: String },
+    FriendsLoaded { friends: Vec<String> },
+    FriendRequestsLoaded { requests: Vec<(String, String)> },
+    FriendRequestResult { success: bool, message: String },
 }

@@ -76,7 +76,8 @@ pub async fn send_group_message(db: Arc<Database>, session_token: &str, group_na
         Some(uid) => uid,
         None => return "ERR: Invalid session".to_string(),
     };
-    let group_row = sqlx::query("SELECT id FROM groups WHERE name = ?")
+    // group_name is actually group_id in this context
+    let group_row = sqlx::query("SELECT id FROM groups WHERE id = ?")
         .bind(group_name)
         .fetch_optional(&db.pool)
         .await;
@@ -182,12 +183,13 @@ pub async fn send_private_message(db: Arc<Database>, session_token: &str, to_use
     }
 }
 
-pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_name: &str) -> String {
+pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_name: &str, config: &ServerConfig) -> String {
     let user_id = match auth::validate_session(db.clone(), session_token).await {
         Some(uid) => uid,
         None => return "ERR: Invalid session".to_string(),
     };
-    let group_row = sqlx::query("SELECT id FROM groups WHERE name = ?")
+    // group_name is actually group_id in this context
+    let group_row = sqlx::query("SELECT id FROM groups WHERE id = ?")
         .bind(group_name)
         .fetch_optional(&db.pool)
         .await;
@@ -213,11 +215,26 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
         .await;
     match rows {
         Ok(rows) => {
+            // For group messages we need the list of participants to derive the chat key
+            let members_rows = sqlx::query("SELECT user_id FROM group_members WHERE group_id = ?")
+                .bind(&group_id)
+                .fetch_all(&db.pool)
+                .await;
+            let group_members: Vec<String> = match members_rows {
+                Ok(rows) => rows.iter().map(|r| r.get::<String, _>("user_id")).collect::<Vec<String>>(),
+                Err(_) => vec![],
+            };
+
             let msgs: Vec<String> = rows.iter().map(|r| {
                 let sender: String = r.get("sender_id");
                 let msg: String = r.get("message");
                 let ts: i64 = r.get("sent_at");
-                format!("[{}] {}: {}", ts, sender, msg)
+                // Attempt to decrypt; if decryption fails, show placeholder
+                let clear = match decrypt_message_from_storage(&msg, &group_members, config) {
+                    Ok(s) => s,
+                    Err(_) => "[DECRYPTION FAILED]".to_string(),
+                };
+                format!("[{}] {}: {}", ts, sender, clear).into()
             }).collect();
             format!("OK: Messages:\n{}", msgs.join("\n"))
         }
@@ -233,6 +250,17 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
         Some(uid) => uid,
         None => return "ERR: Invalid session".to_string(),
     };
+    
+    // Ottieni anche il nostro username per i messaggi
+    let my_username = match sqlx::query("SELECT username FROM users WHERE id = ?")
+        .bind(&user_id)
+        .fetch_optional(&db.pool)
+        .await
+    {
+        Ok(Some(row)) => row.get::<String,_>("username"),
+        _ => "Unknown".to_string(),
+    };
+    
     let to_row = sqlx::query("SELECT id FROM users WHERE username = ?")
         .bind(other_username)
         .fetch_optional(&db.pool)
@@ -252,17 +280,20 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
         Ok(rows) => {
             let msgs: Vec<String> = rows.iter().filter_map(|r| {
                 let sender: String = r.get("sender_id");
-                let encrypted_msg: String = r.get("message");
+                // Converti sender_id in username
+                let sender_name = if sender == user_id {
+                    my_username.clone()
+                } else {
+                    other_username.to_string()
+                };
+                let msg: String = r.get("message");
                 let ts: i64 = r.get("sent_at");
-                
-                // Decrypt the message
-                match decrypt_message_from_storage(&encrypted_msg, &ids, config) {
-                    Ok(decrypted_msg) => Some(format!("[{}] {}: {}", ts, sender, decrypted_msg)),
-                    Err(e) => {
-                        println!("[MSG] Failed to decrypt message: {}", e);
-                        Some(format!("[{}] {}: [DECRYPTION FAILED]", ts, sender))
-                    }
-                }
+                // For private chats the participants are the two user ids we already computed in `ids`
+                let clear = match decrypt_message_from_storage(&msg, &ids, config) {
+                    Ok(s) => s,
+                    Err(_) => msg.clone(),
+                };
+                format!("[{}] {}: {}", ts, sender_name, clear).into()
             }).collect();
             format!("OK: Messages:\n{}", msgs.join("\n"))
         }

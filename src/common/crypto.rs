@@ -4,6 +4,7 @@ use rand::{RngCore, rngs::OsRng};
 use serde::{Serialize, Deserialize};
 use ring::aead::{self, AES_256_GCM, LessSafeKey, UnboundKey, Nonce, NONCE_LEN};
 use ring::error::Unspecified;
+use std::env;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EncryptedMessage {
@@ -18,7 +19,7 @@ pub struct EncryptedMessage {
 pub struct CryptoManager;
 
 impl CryptoManager {
-    pub fn hash_password(password: &str, salt_length: usize) -> String {
+    pub fn hash_password(password: &str, _salt_length: usize) -> String {
         let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
         let password_hash = argon2.hash_password(password.as_bytes(), &salt).unwrap();
@@ -105,6 +106,67 @@ impl CryptoManager {
         let mut nonce = vec![0u8; length];
         OsRng.fill_bytes(&mut nonce);
         nonce
+    }
+
+    /// Parse a 64-char hex string into a 32-byte key
+    pub fn parse_master_key_hex(key_hex: &str) -> Option<[u8; 32]> {
+        if key_hex.len() != 64 { return None; }
+        let mut key = [0u8; 32];
+        for i in 0..32 {
+            let byte_str = &key_hex[i*2..(i*2)+2];
+            match u8::from_str_radix(byte_str, 16) {
+                Ok(b) => key[i] = b,
+                Err(_) => return None,
+            }
+        }
+        Some(key)
+    }
+
+    /// Load master key from ENCRYPTION_MASTER_KEY env (via dotenv). Returns None if missing/invalid.
+    pub fn load_master_key_from_env() -> Option<[u8; 32]> {
+        // First try dotenv to populate environment
+        let _ = dotenvy::dotenv();
+        if let Ok(key_hex) = env::var("ENCRYPTION_MASTER_KEY") {
+            if let Some(k) = Self::parse_master_key_hex(&key_hex) {
+                return Some(k);
+            } else {
+                println!("[CRYPTO] ENCRYPTION_MASTER_KEY present but not valid hex");
+            }
+        }
+
+        // Fallback: try to read common .env file locations to extract the key manually.
+    let mut candidates = vec![
+            std::path::PathBuf::from(".env"),
+            std::path::PathBuf::from("../.env"),
+        ];
+        // CARGO_MANIFEST_DIR is set during build; try to check it at runtime as well
+        if let Ok(manifest) = env::var("CARGO_MANIFEST_DIR") {
+            candidates.push(std::path::PathBuf::from(manifest).join(".env"));
+        }
+
+        for path in candidates {
+            if path.exists() {
+                if let Ok(contents) = std::fs::read_to_string(&path) {
+                    for line in contents.lines() {
+                        let l = line.trim();
+                        if l.starts_with('#') || l.is_empty() { continue; }
+                        if let Some((k, v)) = l.split_once('=') {
+                            if k.trim() == "ENCRYPTION_MASTER_KEY" {
+                                let value = v.trim().trim_matches('"');
+                                if let Some(parsed) = Self::parse_master_key_hex(value) {
+                                    println!("[CRYPTO] Loaded ENCRYPTION_MASTER_KEY from file: {}", path.display());
+                                    return Some(parsed);
+                                } else {
+                                    println!("[CRYPTO] ENCRYPTION_MASTER_KEY in {} is not valid hex", path.display());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 }
 

@@ -2,8 +2,8 @@ use crate::server::database::Database;
 use crate::server::config::ServerConfig;
 use std::sync::Arc;
 use sqlx::Row;
-use argon2::{Argon2, password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng}};
-use rand::{Rng, RngCore};
+use argon2::{Argon2, password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString}};
+use rand::RngCore;
 
 
 /// Logout: elimina la sessione e imposta utente offline

@@ -40,7 +40,13 @@ impl Application for ChatApp {
                     Ok(response) => {
                         let cleaned = response.split("SESSION:").next().map(|s| s.trim().to_string()).unwrap_or_default();
                         if response.starts_with("OK:") {
-                            return Message::AuthResult { success: true, message: cleaned, token: Some(token) };
+                            // Extract username from response for auto-login display
+                            let username = cleaned.trim_start_matches("OK:").trim();
+                            return Message::AuthResult { 
+                                success: true, 
+                                message: format!("OK: {}", username), 
+                                token: Some(token) 
+                            };
                         } else {
                             return Message::SessionMissing;
                         }
@@ -60,8 +66,8 @@ impl Application for ChatApp {
     }
 
     fn update(&mut self, message: Message) -> Command<Message> {
-        use crate::client::models::messages::Message as Msg;
-        match &message {
+    use crate::client::models::messages::Message as Msg;
+    match message.clone() {
             Msg::SubmitLoginOrRegister => {
                 let username = self.state.username.clone();
                 let password = self.state.password.clone();
@@ -111,17 +117,180 @@ impl Application for ChatApp {
                     |msg| msg,
                 );
             }
+            Msg::StartMessagePolling { with } => {
+                if !self.state.polling_active {
+                    println!("[APP] StartMessagePolling requested for {}", with);
+                    self.state.polling_active = true;
+                    let svc = self.chat_service.clone();
+                    let token = self.state.session_token.clone().unwrap_or_default();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let with_clone = with.clone();
+                    return Command::perform(
+                        async move {
+                            println!("[APP] Fetching private messages for {}", with_clone);
+                            let mut guard = svc.lock().await;
+                            match guard.get_private_messages(&host, &token, &with_clone).await {
+                                Ok(messages) => {
+                                    println!("[APP] Fetched {} private messages for {}", messages.len(), with_clone);
+                                    Msg::NewMessagesReceived { with: with_clone.clone(), messages }
+                                }
+                                Err(e) => {
+                                    println!("[APP] Private fetch failed for {}: {}", with_clone, e);
+                                    Msg::NewMessagesReceived { with: with_clone.clone(), messages: vec![] }
+                                }
+                            }
+                        },
+                        |msg| msg,
+                    );
+                } else {
+                    return Command::<Message>::none();
+                }
+            }
+            Msg::StartGroupMessagePolling { group_id } => {
+                if !self.state.group_polling_active {
+                    println!("[APP] StartGroupMessagePolling requested for {}", group_id);
+                    self.state.group_polling_active = true;
+                    let svc = self.chat_service.clone();
+                    let token = self.state.session_token.clone().unwrap_or_default();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let group_id_clone = group_id.clone();
+                    return Command::perform(
+                        async move {
+                            println!("[APP] Fetching group messages for {}", group_id_clone);
+                            let mut guard = svc.lock().await;
+                            match guard.get_group_messages(&host, &token, &group_id_clone).await {
+                                Ok(messages) => {
+                                    println!("[APP] Fetched {} group messages for {}", messages.len(), group_id_clone);
+                                    Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages }
+                                }
+                                Err(e) => {
+                                    println!("[APP] Group fetch failed for {}: {}", group_id_clone, e);
+                                    Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages: vec![] }
+                                }
+                            }
+                        },
+                        |msg| msg,
+                    );
+                } else {
+                    return Command::<Message>::none();
+                }
+            }
+            Msg::StopGroupMessagePolling => {
+                self.state.group_polling_active = false;
+                    return Command::<Message>::none();
+            }
+            Msg::NewGroupMessagesReceived { group_id, messages } => {
+                if self.state.group_polling_active {
+                    println!("[APP] NewGroupMessagesReceived for {}: {} messages", group_id, messages.len());
+                    self.state.group_chats.insert(group_id.clone(), messages.to_vec());
+                    // clear loading flag when messages arrive
+                    self.state.loading_group_chats.remove(&group_id);
+                    
+                    // Continue polling
+                    let svc = self.chat_service.clone();
+                    let token = self.state.session_token.clone().unwrap_or_default();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let group_id_clone = group_id.clone();
+                    
+                    return Command::perform(
+                        async move {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                            let mut guard = svc.lock().await;
+                            match guard.get_group_messages(&host, &token, &group_id_clone).await {
+                                Ok(messages) => {
+                                    drop(guard);
+                                    Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages }
+                                }
+                                Err(_) => {
+                                    drop(guard);
+                                    Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages: vec![] }
+                                }
+                            }
+                        },
+                        |msg| msg,
+                    );
+                } else {
+                    return Command::<Message>::none();
+                }
+            }
+            Msg::TriggerImmediateGroupRefresh { group_id } => {
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                let token = self.state.session_token.clone().unwrap_or_default();
+                let svc = self.chat_service.clone();
+                let group_id_cloned = group_id.clone();
+                return iced::Command::perform(
+                    async move {
+                        let mut guard = svc.lock().await;
+                        guard.get_group_messages(&host, &token, &group_id_cloned).await.unwrap_or_default()
+                    },
+                    move |messages| Msg::NewGroupMessagesReceived { group_id: group_id.clone(), messages }
+                );
+            }
+            Msg::StopMessagePolling => {
+                self.state.polling_active = false;
+                    return Command::<Message>::none();
+            }
+            Msg::NewMessagesReceived { with, messages } => {
+                if self.state.polling_active {
+                    println!("[APP] NewMessagesReceived for {}: {} messages", with, messages.len());
+                    self.state.private_chats.insert(with.clone(), messages.to_vec());
+                    // clear loading flag when messages arrive
+                    self.state.loading_private_chats.remove(&with);
+                    
+                    // Continue polling
+                    let svc = self.chat_service.clone();
+                    let token = self.state.session_token.clone().unwrap_or_default();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let username = with.clone();
+                    
+                    return Command::perform(
+                        async move {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                            let mut guard = svc.lock().await;
+                            match guard.get_private_messages(&host, &token, &username).await {
+                                Ok(messages) => {
+                                    drop(guard);
+                                    Msg::NewMessagesReceived { with: username.clone(), messages }
+                                }
+                                Err(_) => {
+                                    drop(guard);
+                                    Msg::NewMessagesReceived { with: username.clone(), messages: vec![] }
+                                }
+                            }
+                        },
+                        |msg| msg,
+                    );
+                } else {
+                    return Command::<Message>::none();
+                }
+            }
+            Msg::TriggerImmediateRefresh { with } => {
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                let token = self.state.session_token.clone().unwrap_or_default();
+                let svc = self.chat_service.clone();
+                    let with_cloned = with.clone();
+                    return iced::Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            guard.get_private_messages(&host, &token, &with_cloned).await.unwrap_or_default()
+                        },
+                        move |messages| Msg::NewMessagesReceived { with: with.clone(), messages }
+                    );
+            }
             _ => {}
         }
-    self.state.update(message, &self.chat_service)
+        self.state.update(message.clone(), &self.chat_service)
     }
 
     fn view(&self) -> Element<Message> {
         match &self.state.app_state {
-            AppState::CheckingSession => {
-                // Small placeholder while we validate a persisted session token on startup.
-                iced::widget::Text::new("Controllo sessione...").into()
-            }
+            AppState::CheckingSession => iced::widget::Text::new("Controllo sessione...").into(),
             AppState::Registration => crate::client::gui::views::registration::view(&self.state),
             AppState::MainActions => crate::client::gui::views::main_actions::view(&self.state),
             AppState::PrivateChat(username) => crate::client::gui::views::private_chat::view(&self.state, username),
@@ -129,6 +298,12 @@ impl Application for ChatApp {
             AppState::UsersList(kind) => crate::client::gui::views::users_list::view(&self.state, kind),
             AppState::FriendRequests => crate::client::gui::views::friend_requests::view(&self.state),
             AppState::Chat => crate::client::gui::views::main_actions::view(&self.state),
+            AppState::CreateGroup => crate::client::gui::views::create_group::view(&self.state),
+            AppState::MyGroups => crate::client::gui::views::my_groups::view(&self.state),
+            AppState::InviteToGroup { group_id, group_name } => crate::client::gui::views::invite_to_group::view(&self.state, group_id, group_name),
+            AppState::MyGroupInvites => crate::client::gui::views::my_group_invites::view(&self.state),
+            AppState::SendFriendRequest => crate::client::gui::views::send_friend_request::view(&self.state),
+            AppState::ViewFriends => crate::client::gui::views::view_friends::view(&self.state),
         }
     }
 }

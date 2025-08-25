@@ -1,888 +1,1043 @@
+use std::collections::HashMap;
+use crate::client::gui::views::registration::HostType;
+use crate::client::gui::views::logger::LogMessage;
+use crate::client::models::messages::Message;
+use crate::client::services::chat_service::ChatService;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use iced::Command;
+use iced::widget::scrollable;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AppState {
     CheckingSession,
     Registration,
     MainActions,
-    Chat,
     PrivateChat(String),
     GroupChat(String, String),
     UsersList(String),
     FriendRequests,
+    Chat,
+    CreateGroup,
+    MyGroups,
+    InviteToGroup { group_id: String, group_name: String },
+    MyGroupInvites,
+    SendFriendRequest,
+    ViewFriends,
 }
 
 impl Default for AppState {
     fn default() -> Self {
-    AppState::CheckingSession
+        AppState::CheckingSession
     }
 }
 
-
-use crate::client::gui::views::registration::HostType;
-use crate::client::gui::views::logger::LogMessage;
-use crate::server::config::ClientConfig;
-use chrono::{DateTime, Local};
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub sender: String,
+    pub content: String,
+    pub timestamp: i64,
+    pub formatted_time: String,
+    pub sent_at: i64,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ChatAppState {
     pub app_state: AppState,
     pub username: String,
     pub password: String,
-    pub current_user_uuid: Option<String>, // UUID dell'utente corrente
     pub selected_host: HostType,
     pub manual_host: String,
     pub is_login: bool,
-    pub error_message: Option<String>,
     pub loading: bool,
-    pub logger: Vec<LogMessage>,
-    pub welcome_message: Option<String>,
+    pub error_message: Option<String>,
     pub session_token: Option<String>,
-    pub show_password: bool, // aggiunto per toggle password
-    // Users list/search UI state
-    pub users_list_cache: Vec<String>,
-    pub users_search_results: Vec<String>,
+    pub show_password: bool,
+    pub logger: Vec<LogMessage>,
     pub users_search_query: String,
-    // Private chat state
-    pub current_private_chat_user: Option<String>,
-    pub private_message_input: String,
-    pub private_messages: Vec<PrivateMessage>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PrivateMessage {
-    pub from_user: String,
-    pub to_user: String,
-    pub content: String,
-    pub timestamp: String,
-    pub is_sent_by_me: bool,
+    pub users_search_results: Vec<String>,
+    pub current_message_input: String,
+    pub private_chats: HashMap<String, Vec<ChatMessage>>,
+    pub loading_private_chats: std::collections::HashSet<String>,
+    pub polling_active: bool,
+    pub group_chats: HashMap<String, Vec<ChatMessage>>,
+    pub loading_group_chats: std::collections::HashSet<String>,
+    pub group_polling_active: bool,
+    pub create_group_name: String,
+    pub selected_participants: std::collections::HashSet<String>,
+    pub my_groups: Vec<(String, String, usize)>, // (id, name, member_count)
+    pub loading_groups: bool,
+    pub my_group_invites: Vec<(i64, String, String)>, // (invite_id, group_name, invited_by)
+    pub loading_invites: bool,
+    pub friends_list: Vec<String>,
+    pub friend_requests: Vec<(String, String)>, // (username, message)
 }
 
 impl ChatAppState {
-    pub fn update(&mut self, message: crate::client::models::messages::Message, chat_service: &std::sync::Arc<tokio::sync::Mutex<crate::client::services::chat_service::ChatService>>) -> iced::Command<crate::client::models::messages::Message> {
-    use crate::client::models::messages::Message as Msg;
-    use crate::client::utils::session_store;
-    match message {
-            Msg::UsernameChanged(val) => self.username = val,
-            Msg::PasswordChanged(val) => self.password = val,
-            Msg::HostSelected(host) => self.selected_host = host,
-            Msg::ManualHostChanged(val) => self.manual_host = val,
-            Msg::ToggleLoginRegister => self.is_login = !self.is_login,
-            Msg::ToggleShowPassword => self.show_password = !self.show_password,
-            Msg::SubmitLoginOrRegister => {
-                self.loading = true;
-                self.error_message = None;
-                let username = self.username.clone();
-                let password = self.password.clone();
-                let is_login = self.is_login;
-                let selected_host = self.selected_host.clone();
-                let manual_host = self.manual_host.clone();
-                let svc = chat_service.clone();
-                // determine host
-                let cfg = ClientConfig::from_env();
-                let host = match selected_host {
-                    HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                    HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                    HostType::Manual => manual_host,
-                };
-                return iced::Command::perform(async move {
-                    let mut guard = svc.lock().await;
-                    let cmd = if is_login {
-                        format!("/login {} {}", username, password)
-                    } else {
-                        format!("/register {} {}", username, password)
-                    };
-                    match guard.send_command(&host, cmd).await {
-                        Ok(resp) => {
-                            // parse SESSION token if present
-                            let token = resp.lines().find_map(|l| l.split("SESSION:").nth(1).map(|s| s.trim().to_string()));
-                            let success = resp.starts_with("OK:");
-                            crate::client::models::messages::Message::AuthResult { success, message: resp, token }
-                        }
-                        Err(e) => crate::client::models::messages::Message::AuthResult { success: false, message: format!("ERR: {}", e), token: None },
-                    }
-                }, |m| m);
+    pub fn update(&mut self, message: Message, chat_service: &Arc<Mutex<ChatService>>) -> Command<Message> {
+        use crate::client::gui::views::logger::{LogMessage, LogLevel};
+        use crate::client::utils::session_store;
+        use crate::client::services::users_service::UsersService;
+        
+        match message {
+            Message::ManualHostChanged(host) => {
+                self.manual_host = host;
             }
-            Msg::AuthResult { success, message, token } => {
+            Message::UsernameChanged(username) => {
+                self.username = username;
+            }
+            Message::PasswordChanged(password) => {
+                self.password = password;
+            }
+            Message::HostSelected(host_type) => {
+                self.selected_host = host_type;
+            }
+            Message::ToggleLoginRegister => {
+                self.is_login = !self.is_login;
+                self.error_message = None;
+            }
+            Message::ToggleShowPassword => {
+                self.show_password = !self.show_password;
+            }
+            Message::AuthResult { success, message, token } => {
                 self.loading = false;
                 if success {
-                    // store token in memory and persist securely (keyring)
-                    if let Some(ref t) = token {
+                    if let Some(t) = token {
                         self.session_token = Some(t.clone());
-                        let _ = session_store::save_session_token(t);
-                    }
-                    // If the username is not set (startup from saved token), try to extract it from server message
-                    if self.username.trim().is_empty() {
-                        if message.starts_with("OK:") {
-                            if let Some(name_part) = message.splitn(2, ':').nth(1) {
-                                self.username = name_part.trim().to_string();
-                            }
-                        }
-                    }
-                    
-                    // Set the current user UUID based on username (temporary hardcoded solution)
-                    self.current_user_uuid = match self.username.as_str() {
-                        "Luigi13" => Some("6e991eec-426b-4cab-b2b7-b511f11bdc61".to_string()),
-                        "Dory" => Some("862758e3-2edb-447f-a53c-058e00d095a2".to_string()),
-                        _ => None, // Unknown user
-                    };
-                    println!("[DEBUG] Set current_user_uuid for {}: {:?}", self.username, self.current_user_uuid);
-                    
-                    // Push a single success log (replace previous) and switch to main state
-                    let action = if self.is_login { "Login" } else { "Registrazione" };
-                    self.logger.clear();
-                    self.logger.push(crate::client::gui::views::logger::LogMessage {
-                        level: crate::client::gui::views::logger::LogLevel::Success,
-                        message: format!("Benvenuto, {}.", self.username),
-                    });
-                    self.app_state = AppState::MainActions;
-                    // Schedule auto-clear of the log after 5 seconds
-                    return iced::Command::perform(async { tokio::time::sleep(std::time::Duration::from_secs(5)).await; () }, |_| Msg::ClearLog);
-                } else {
-                    // sanitize server message: remove SESSION part and OK:/ERR prefixes
-                    let raw = message.split("SESSION:").next().map(|s| s.trim()).unwrap_or("").to_string();
-                    let cleaned = raw.trim_start_matches("OK:").trim_start_matches("ERR:").trim().to_string();
-                    // Map common server messages into short, user-friendly Italian messages
-                    let user_friendly = if cleaned.contains("User not found") || cleaned.contains("user not found") {
-                        "Utente non trovato. Verifica username e riprova.".to_string()
-                    } else if cleaned.contains("UNIQUE constraint failed") || cleaned.contains("UNIQUE constraint") {
-                        // If we were attempting registration, show explicit registration-failed message
-                        if !self.is_login {
-                            // include attempted username when available
-                            if !self.username.trim().is_empty() {
-                                format!("Registrazione fallita: l'username '{}' è già in uso.", self.username.trim())
-                            } else {
-                                "Registrazione fallita: username già in uso. Scegli un altro username.".to_string()
-                            }
+                        // Save token securely
+                        if let Err(e) = session_store::save_session_token(&t) {
+                            println!("[SESSION_STORE] Failed to save token: {}", e);
                         } else {
-                            "Username già in uso. Scegli un altro username.".to_string()
+                            println!("[SESSION_STORE] Token saved successfully");
                         }
-                    } else if cleaned.contains("incorrect password") || cleaned.contains("Invalid credentials") {
-                        "Password errata. Riprova.".to_string()
-                    } else if cleaned.contains("connection refused") || cleaned.contains("disconnected") {
-                        "Impossibile connettersi al server. Controlla rete/host.".to_string()
-                    } else {
-                        // fallback: show a short summary
-                        "Autenticazione fallita. Controlla i dati e riprova.".to_string()
-                    };
-                    // Do not set bottom inline error_message; rely on top logger only
+                        
+                        // Extract username from success message for auto-login cases
+                        if message.starts_with("OK:") {
+                            let username_part = message.trim_start_matches("OK:").trim();
+                            if !username_part.is_empty() && self.username.is_empty() {
+                                self.username = username_part.to_string();
+                            }
+                        }
+                    }
+                    self.app_state = AppState::MainActions;
+                    // Clear any previous error messages and logger for clean transition
                     self.error_message = None;
                     self.logger.clear();
-                    self.logger.push(crate::client::gui::views::logger::LogMessage {
-                        level: crate::client::gui::views::logger::LogLevel::Error,
-                        message: format!("{}", user_friendly),
+                    self.logger.push(LogMessage {
+                        level: LogLevel::Success,
+                        message: if self.is_login || message.contains("validate") { 
+                            "Login successful".to_string() 
+                        } else { 
+                            "Registration successful".to_string() 
+                        },
                     });
-                    // Auto-clear after 5 seconds
-                    return iced::Command::perform(async { tokio::time::sleep(std::time::Duration::from_secs(5)).await; () }, |_| Msg::ClearLog);
-                }
-            }
-            Msg::Logout => {
-                // Attempt to send a /logout command to the server (if we have a token).
-                // Capture token before clearing local state.
-                let token_to_send = if let Some(t) = self.session_token.clone() {
-                    Some(t)
                 } else {
-                    session_store::load_session_token()
-                };
-
-                // Immediately clear persisted/local session and switch UI to registration.
-                let _ = session_store::clear_session_token();
-                self.session_token = None;
-                self.app_state = AppState::Registration;
-                self.welcome_message = None;
-                self.logger.clear();
-                self.logger.push(crate::client::gui::views::logger::LogMessage {
-                    level: crate::client::gui::views::logger::LogLevel::Info,
-                    message: "Logout effettuato con successo.".to_string(),
-                });
-
-                // If we have a token, asynchronously send /logout <token> using the shared ChatService.
-                if let Some(token) = token_to_send {
-                    // Resolve host selection similar to other flows
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    return iced::Command::perform(async move {
-                        let mut guard = svc.lock().await;
-                        match guard.send_command(&host, format!("/logout {}", token)).await {
-                            Ok(resp) => Msg::LogInfo(format!("Logout response: {}", resp)),
-                            Err(e) => Msg::LogError(format!("Logout failed: {}", e)),
-                        }
-                    }, |m| m);
+                    self.error_message = Some(message.clone());
+                    self.logger.clear(); // Clear previous messages
+                    self.logger.push(LogMessage {
+                        level: LogLevel::Error,
+                        message: message.clone(),
+                    });
                 }
-
-                // Fallback: keep the small clear-log timer
-                return iced::Command::perform(async { tokio::time::sleep(std::time::Duration::from_secs(3)).await; () }, |_| Msg::ClearLog);
             }
-            Msg::LogInfo(msg) => self.logger.push(crate::client::gui::views::logger::LogMessage {
-                level: crate::client::gui::views::logger::LogLevel::Info,
-                message: msg,
-            }),
-            Msg::LogSuccess(msg) => self.logger.push(crate::client::gui::views::logger::LogMessage {
-                level: crate::client::gui::views::logger::LogLevel::Success,
-                message: msg,
-            }),
-            Msg::LogError(msg) => self.logger.push(crate::client::gui::views::logger::LogMessage {
-                level: crate::client::gui::views::logger::LogLevel::Error,
-                message: msg,
-            }),
-            Msg::ClearLog => {
+            Message::SessionMissing => {
+                self.app_state = AppState::Registration;
+                self.logger.clear(); // Clear any previous messages
+            }
+            Message::Logout => {
+                // Clear session token from secure storage
+                let _ = session_store::clear_session_token();
+                
+                // Show logout message temporarily
+                self.logger.clear();
+                self.logger.push(LogMessage {
+                    level: LogLevel::Info,
+                    message: "Logout successful".to_string(),
+                });
+                
+                // Send logout command if we have a token
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let token_clone = token.clone();
+                    
+                    // Send logout command asynchronously but don't wait for response
+                    tokio::spawn(async move {
+                        let mut guard = svc.lock().await;
+                        let _ = guard.send_command(&host, format!("/logout {}", token_clone)).await;
+                    });
+                }
+                
+                // Reset state
+                self.session_token = None;
+                self.username.clear();
+                self.password.clear();
+                self.app_state = AppState::Registration;
+                
+                // Clear logger after a delay for temporary logout message
+                return Command::perform(
+                    async move {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        Message::ClearLog
+                    },
+                    |msg| msg,
+                );
+            }
+            Message::ClearLog => {
                 self.logger.clear();
             }
-            Msg::SessionMissing => {
-                // No valid session found at startup — show registration/login
-                self.loading = false;
-                self.app_state = AppState::Registration;
+            Message::LogInfo(msg) => {
+                self.logger.push(LogMessage {
+                    level: LogLevel::Info,
+                    message: msg,
+                });
             }
-            Msg::OpenFriendRequests => {
-                self.app_state = AppState::FriendRequests;
+            Message::LogSuccess(msg) => {
+                self.logger.push(LogMessage {
+                    level: LogLevel::Success,
+                    message: msg,
+                });
             }
-            Msg::OpenMainActions => {
+            Message::LogError(msg) => {
+                self.logger.push(LogMessage {
+                    level: LogLevel::Error,
+                    message: msg,
+                });
+            }
+            Message::OpenMainActions => {
                 self.app_state = AppState::MainActions;
             }
-            Msg::OpenUsersList { kind } => {
-                // when opening, fetch list from server (online or all) and store cache
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Loading {} users...", kind) });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let kind_clone = kind.clone();
-                    return iced::Command::perform(async move {
-                        if kind_clone == "Online" {
-                            match crate::client::services::users_service::UsersService::list_online(&svc, &host).await {
-                                Ok(list) => Msg::UsersListLoaded { kind: kind_clone.clone(), list },
-                                Err(e) => Msg::LogError(format!("Load users failed: {}", e)),
-                            }
-                        } else {
-                            match crate::client::services::users_service::UsersService::list_all(&svc, &host).await {
-                                Ok(list) => Msg::UsersListLoaded { kind: kind_clone.clone(), list },
-                                Err(e) => Msg::LogError(format!("Load users failed: {}", e)),
-                            }
-                        }
-                    }, |m| m);
-                } else {
-                    // no token: still open view but empty cache
-                    self.app_state = AppState::UsersList(kind);
-                }
-            }
-            Msg::UsersListLoaded { kind, list } => {
-                // Exclude current user (case-insensitive) from cache and results
-                let me = self.username.to_lowercase();
-                let filtered: Vec<String> = list.into_iter().filter(|u| u.to_lowercase() != me).collect();
-                self.users_list_cache = filtered.clone();
-                let mut r = filtered;
-                r.truncate(10);
-                self.users_search_results = r;
-                self.app_state = AppState::UsersList(kind);
-            }
-            Msg::UsersSearchQueryChanged(q) => {
-                self.users_search_query = q;
-            }
-            Msg::UsersSearch => {
-                // perform local filter on users_list_cache
-                let q = self.users_search_query.to_lowercase();
-                let me = self.username.to_lowercase();
-                let mut results: Vec<String> = self.users_list_cache.iter()
-                    .filter(|u| {
-                        let lu = u.to_lowercase();
-                        lu.contains(&q) && lu != me
-                    })
-                    .cloned()
-                    .collect();
-                results.truncate(10);
-                self.users_search_results = results;
-            }
-            Msg::OpenPrivateChat(username) => {
-                self.app_state = AppState::PrivateChat(username);
-            }
-            Msg::OpenGroupChat(group_id, group_name) => {
-                self.app_state = AppState::GroupChat(group_id, group_name);
-            }
-            // Quick test network actions
-            Msg::SendGroupMessageTest => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Invio messaggio di gruppo (test)...".to_string() });
-                // Perform async network call via shared ChatService
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let token_clone = token.clone();
-                    let svc = chat_service.clone();
-                    return iced::Command::perform(async move {
-                        let res = crate::client::services::group_service::GroupService::send_group_message(&svc, &host, &token_clone, "GruppoDemo", "Test message from UI").await;
-                        match res {
-                            Ok(r) => Msg::LogInfo(format!("Group send: {}", r)),
-                            Err(e) => Msg::LogError(format!("Group send failed: {}", e)),
-                        }
-                    }, |m| m);
-                } else {
-                    self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Error, message: "No session token available".to_string() });
-                }
-            }
-            Msg::GetGroupMessagesTest => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta messaggi gruppo (test)...".to_string() });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let token_clone = token.clone();
-                    let svc = chat_service.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::group_service::GroupService::get_group_messages(&svc, &host, &token_clone, "GruppoDemo").await {
-                            Ok(msgs) => Msg::LogInfo(format!("Got {} messages", msgs.len())),
-                            Err(e) => Msg::LogError(format!("Get group failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::DeleteGroupMessagesTest => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Cancellazione messaggi gruppo (test)...".to_string() });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let token_clone = token.clone();
-                    let svc = chat_service.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::group_service::GroupService::delete_group_messages(&svc, &host, &token_clone, "group-id-demo").await {
-                            Ok(r) => Msg::LogInfo(format!("Delete group: {}", r)),
-                            Err(e) => Msg::LogError(format!("Delete group failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::SendPrivateMessageTest => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Invio messaggio privato (test)...".to_string() });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let token_clone = token.clone();
-                    let svc = chat_service.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::friend_service::FriendService::send_private_message(&svc, &host, &token_clone, "alice", "Hello from UI test").await {
-                            Ok(r) => Msg::LogInfo(format!("Private send: {}", r)),
-                            Err(e) => Msg::LogError(format!("Private send failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            // Friend system actions handlers
-            Msg::SendFriendRequest { to, message } => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Invio richiesta amicizia a {}...", to) });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::friend_service::FriendService::send_friend_request(&svc, &host, &token_clone, &to, &message).await {
-                            Ok(r) => Msg::LogInfo(format!("Friend request: {}", r)),
-                            Err(e) => Msg::LogError(format!("Friend request failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::AcceptFriendRequest { from } => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Accetto richiesta amicizia da {}...", from) });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::friend_service::FriendService::accept_friend_request(&svc, &host, &token_clone, &from).await {
-                            Ok(r) => Msg::LogInfo(format!("Accept request: {}", r)),
-                            Err(e) => Msg::LogError(format!("Accept failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::RejectFriendRequest { from } => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Rifiuto richiesta amicizia da {}...", from) });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::friend_service::FriendService::reject_friend_request(&svc, &host, &token_clone, &from).await {
-                            Ok(r) => Msg::LogInfo(format!("Reject request: {}", r)),
-                            Err(e) => Msg::LogError(format!("Reject failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::ListFriends => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta lista amici...".to_string() });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::friend_service::FriendService::list_friends(&svc, &host, &token_clone).await {
-                            Ok(list) => Msg::LogInfo(format!("Friends: {}", list.join(", "))),
-                            Err(e) => Msg::LogError(format!("List friends failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::ListOnlineUsers => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta utenti online...".to_string() });
-                let cfg = ClientConfig::from_env();
-                let host = match self.selected_host {
-                    HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                    HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                    HostType::Manual => self.manual_host.clone(),
-                };
-                let svc = chat_service.clone();
-                return iced::Command::perform(async move {
-                    match crate::client::services::users_service::UsersService::list_online(&svc, &host).await {
-                        Ok(list) => Msg::LogInfo(format!("Online: {}", list.join(", "))),
-                        Err(e) => Msg::LogError(format!("List online failed: {}", e)),
-                    }
-                }, |m| m);
-            }
-            Msg::ListAllUsers => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta lista utenti...".to_string() });
-                let cfg = ClientConfig::from_env();
-                let host = match self.selected_host {
-                    HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                    HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                    HostType::Manual => self.manual_host.clone(),
-                };
-                let svc = chat_service.clone();
-                return iced::Command::perform(async move {
-                    match crate::client::services::users_service::UsersService::list_all(&svc, &host).await {
-                        Ok(list) => Msg::LogInfo(format!("All users: {}", list.join(", "))),
-                        Err(e) => Msg::LogError(format!("List all failed: {}", e)),
-                    }
-                }, |m| m);
-            }
-            Msg::CreateGroup { name } => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Creazione gruppo {}...", name) });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::group_service::GroupService::create_group(&svc, &host, &token_clone, &name).await {
-                            Ok(r) => Msg::LogInfo(format!("Create group: {}", r)),
-                            Err(e) => Msg::LogError(format!("Create group failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            // Group invite and membership actions
-            Msg::InviteToGroup { group_id, username } => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Invito {} al gruppo {}...", username, group_id) });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    let group = group_id.clone();
-                    let user = username.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::group_service::GroupService::invite(&svc, &host, &token_clone, &group, &user).await {
-                            Ok(r) => Msg::LogInfo(format!("Invite: {}", r)),
-                            Err(e) => Msg::LogError(format!("Invite failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::AcceptGroupInvite { invite_id } => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Accetto invito gruppo {}...", invite_id) });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    let invite = invite_id.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::group_service::GroupService::accept_invite(&svc, &host, &token_clone, &invite).await {
-                            Ok(r) => Msg::LogInfo(format!("Accept invite: {}", r)),
-                            Err(e) => Msg::LogError(format!("Accept invite failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::RejectGroupInvite { invite_id } => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Rifiuto invito gruppo {}...", invite_id) });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    let invite = invite_id.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::group_service::GroupService::reject_invite(&svc, &host, &token_clone, &invite).await {
-                            Ok(r) => Msg::LogInfo(format!("Reject invite: {}", r)),
-                            Err(e) => Msg::LogError(format!("Reject invite failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::MyGroupInvites => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta miei inviti di gruppo...".to_string() });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::group_service::GroupService::my_invites(&svc, &host, &token_clone).await {
-                            Ok(list) => Msg::LogInfo(format!("Invites: {}", list.join(" | "))),
-                            Err(e) => Msg::LogError(format!("My invites failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::JoinGroup { group_id } => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Join gruppo {}...", group_id) });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    let group = group_id.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::group_service::GroupService::join_group(&svc, &host, &token_clone, &group).await {
-                            Ok(r) => Msg::LogInfo(format!("Join group: {}", r)),
-                            Err(e) => Msg::LogError(format!("Join group failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::LeaveGroup { group_id } => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: format!("Leave gruppo {}...", group_id) });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    let group = group_id.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::group_service::GroupService::leave_group(&svc, &host, &token_clone, &group).await {
-                            Ok(r) => Msg::LogInfo(format!("Leave group: {}", r)),
-                            Err(e) => Msg::LogError(format!("Leave group failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::MyGroups => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta miei gruppi...".to_string() });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::group_service::GroupService::my_groups(&svc, &host, &token_clone).await {
-                            Ok(list) => Msg::LogInfo(format!("My groups: {}", list.join(", "))),
-                            Err(e) => Msg::LogError(format!("My groups failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::ReceivedFriendRequests => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta richieste ricevute...".to_string() });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::friend_service::FriendService::received_friend_requests(&svc, &host, &token_clone).await {
-                            Ok(list) => Msg::LogInfo(format!("Received requests: {}", list.join(" | "))),
-                            Err(e) => Msg::LogError(format!("Received requests failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::SentFriendRequests => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta richieste inviate...".to_string() });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let svc = chat_service.clone();
-                    let token_clone = token.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::friend_service::FriendService::sent_friend_requests(&svc, &host, &token_clone).await {
-                            Ok(list) => Msg::LogInfo(format!("Sent requests: {}", list.join(" | "))),
-                            Err(e) => Msg::LogError(format!("Sent requests failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::GetPrivateMessagesTest => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Richiesta messaggi privati (test)...".to_string() });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let token_clone = token.clone();
-                    let svc = chat_service.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::friend_service::FriendService::get_private_messages(&svc, &host, &token_clone, "alice").await {
-                            Ok(msgs) => Msg::LogInfo(format!("Got {} private messages", msgs.len())),
-                            Err(e) => Msg::LogError(format!("Get private failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::DeletePrivateMessagesTest => {
-                self.logger.push(crate::client::gui::views::logger::LogMessage { level: crate::client::gui::views::logger::LogLevel::Info, message: "Cancellazione messaggi privati (test)...".to_string() });
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
-                    let token_clone = token.clone();
-                    let svc = chat_service.clone();
-                    return iced::Command::perform(async move {
-                        match crate::client::services::friend_service::FriendService::delete_private_messages(&svc, &host, &token_clone, "alice").await {
-                            Ok(r) => Msg::LogInfo(format!("Delete private: {}", r)),
-                            Err(e) => Msg::LogError(format!("Delete private failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            // Private chat messages
-            Msg::StartPrivateChat(username) => {
+            Message::OpenPrivateChat(username) => {
                 self.app_state = AppState::PrivateChat(username.clone());
-                self.current_private_chat_user = Some(username.clone());
-                self.private_messages.clear();
-                self.private_message_input.clear();
-                // Load existing messages
-                return iced::Command::perform(async {}, |_| Msg::LoadPrivateMessages(username));
+                self.current_message_input.clear();
+                // Mark this private chat as loading so the UI shows a loader
+                self.loading_private_chats.insert(username.clone());
+
+                // Start message polling for real-time updates
+                return Command::perform(
+                    async move { Message::StartMessagePolling { with: username } },
+                    |msg| msg,
+                );
             }
-            Msg::PrivateMessageChanged(text) => {
-                self.private_message_input = text;
+            Message::OpenGroupChat(group_id, group_name) => {
+                self.app_state = AppState::GroupChat(group_id.clone(), group_name.clone());
+                self.current_message_input.clear();
+                // Mark this group chat as loading so the UI shows a loader
+                self.loading_group_chats.insert(group_id.clone());
+
+                // Start message polling for real-time updates
+                return Command::perform(
+                    async move { Message::StartGroupMessagePolling { group_id } },
+                    |msg| msg,
+                );
             }
-            Msg::SendPrivateMessage(to_user) => {
-                if !self.private_message_input.trim().is_empty() {
-                    let message_content = self.private_message_input.clone();
-                    self.private_message_input.clear();
-                    
-                    if let Some(token) = self.session_token.clone() {
-                        let cfg = ClientConfig::from_env();
-                        let host = match self.selected_host {
-                            HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                            HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                            HostType::Manual => self.manual_host.clone(),
+            Message::OpenUsersList { kind } => {
+                self.app_state = AppState::UsersList(kind.clone());
+                self.users_search_query.clear();
+                self.users_search_results.clear();
+                
+                // Auto-load users based on kind
+                let svc = chat_service.clone();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                
+                return Command::perform(
+                    async move {
+                        let result = if kind == "Online" {
+                            UsersService::list_online(&svc, &host).await
+                        } else {
+                            UsersService::list_all(&svc, &host).await
                         };
-                        let token_clone = token.clone();
-                        let username_clone = self.username.clone();
-                        let to_user_clone = to_user.clone();
-                        let svc = chat_service.clone();
                         
-                        return iced::Command::perform(async move {
-                            let mut guard = svc.lock().await;
-                            match guard.send_private_message(&host, &token_clone, &to_user_clone, &message_content).await {
-                                Ok(resp) if resp.starts_with("OK:") => {
-                                    Msg::LoadPrivateMessages(to_user_clone)
-                                }
-                                Ok(resp) => Msg::LogError(format!("Send failed: {}", resp)),
-                                Err(e) => Msg::LogError(format!("Send error: {}", e)),
-                            }
-                        }, |m| m);
-                    }
-                }
+                        match result {
+                            Ok(users) => Message::UsersListLoaded { kind, list: users },
+                            Err(_) => Message::UsersListLoaded { kind, list: vec![] },
+                        }
+                    },
+                    |msg| msg,
+                );
             }
-            Msg::LoadPrivateMessages(with_user) => {
-                if let Some(token) = self.session_token.clone() {
-                    let cfg = ClientConfig::from_env();
-                    let host = match self.selected_host {
-                        HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
-                        HostType::Remote => format!("{}:{}", cfg.public_host, cfg.default_port),
-                        HostType::Manual => self.manual_host.clone(),
-                    };
+            Message::OpenFriendRequests => {
+                self.app_state = AppState::FriendRequests;
+                self.loading = true;
+                if let Some(token) = &self.session_token {
                     let token_clone = token.clone();
-                    let with_user_clone = with_user.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                     let svc = chat_service.clone();
-                    
-                    return iced::Command::perform(async move {
-                        let mut guard = svc.lock().await;
-                        match guard.get_private_messages(&host, &token_clone, &with_user_clone).await {
-                            Ok(messages) => Msg::PrivateMessagesLoaded { with_user: with_user_clone, messages },
-                            Err(e) => Msg::LogError(format!("Load messages failed: {}", e)),
-                        }
-                    }, |m| m);
-                }
-            }
-            Msg::PrivateMessagesLoaded { with_user, messages } => {
-                // Parse messages and create PrivateMessage structs
-                println!("[DEBUG] Loading messages - current_username: '{}', with_user: '{}'", self.username, with_user);
-                
-                self.private_messages = messages.into_iter().filter_map(|msg| {
-                    // Debug: print the raw message
-                    println!("[DEBUG] Raw message from server: '{}'", msg);
-                    
-                    // Server format: "[timestamp] sender_id: content"
-                    // First, extract the timestamp part
-                    if let Some(bracket_end) = msg.find("] ") {
-                        let timestamp_str = &msg[1..bracket_end]; // Remove the '[' and ']'
-                        let rest = &msg[bracket_end + 2..]; // Skip '] '
-                        
-                        // Now parse "sender_id: content"
-                        if let Some((sender_id, content)) = rest.split_once(": ") {
-                            // Convert timestamp to readable format using local time
-                            let readable_timestamp = if let Ok(timestamp) = timestamp_str.parse::<i64>() {
-                                // Convert Unix timestamp to local time
-                                chrono::DateTime::from_timestamp(timestamp, 0)
-                                    .map(|dt| dt.with_timezone(&Local).format("%H:%M").to_string())
-                                    .unwrap_or_else(|| timestamp_str.to_string())
-                            } else {
-                                timestamp_str.to_string()
-                            };
-                            
-                            // Determine if this message was sent by current user
-                            // Use the stored UUID of the current user
-                            let is_sent_by_me = if let Some(ref current_uuid) = self.current_user_uuid {
-                                sender_id == current_uuid
-                            } else {
-                                // Fallback to hardcoded logic if UUID not available
-                                let luigi_uuid = "6e991eec-426b-4cab-b2b7-b511f11bdc61";
-                                let dory_uuid = "862758e3-2edb-447f-a53c-058e00d095a2";
-                                
-                                if self.username == "Luigi13" {
-                                    sender_id == luigi_uuid
-                                } else if self.username == "Dory" {
-                                    sender_id == dory_uuid
-                                } else {
-                                    false
+                        return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/received_friend_requests {}", token_clone)).await {
+                                Ok(resp) if resp.starts_with("OK:") => {
+                                    // Parse "OK: Richieste ricevute: alice: msg | bob: msg"
+                                    let after = resp.splitn(3, ':').nth(2).unwrap_or("");
+                                    let requests: Vec<(String, String)> = after.split('|')
+                                        .map(|s| s.trim())
+                                        .filter(|s| !s.is_empty())
+                                        .filter_map(|s| {
+                                            if let Some((user, msg)) = s.split_once(':') {
+                                                Some((user.trim().to_string(), msg.trim().to_string()))
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                    Message::FriendRequestsLoaded { requests }
                                 }
-                            };
-                            
-                            println!("[DEBUG] IMPROVED LOGIC - sender_id: '{}', current_user_uuid: '{:?}', current_username: '{}', is_sent_by_me: {}", 
-                                     sender_id, self.current_user_uuid, self.username, is_sent_by_me);
-                            
-                            // For display purposes, use actual usernames
-                            let from_user = if is_sent_by_me {
-                                self.username.clone()
-                            } else {
-                                with_user.clone()
-                            };
-                            
-                            Some(PrivateMessage {
-                                from_user,
-                                to_user: if is_sent_by_me { with_user.clone() } else { self.username.clone() },
-                                content: content.to_string(),
-                                timestamp: readable_timestamp,
-                                is_sent_by_me,
-                            })
-                        } else {
-                            None
-                        }
-                    } else {
-                        // Fallback for messages without timestamp
-                        if let Some((sender_info, content)) = msg.split_once(": ") {
-                            let is_sent_by_me = sender_info != with_user;
-                            Some(PrivateMessage {
-                                from_user: if is_sent_by_me { self.username.clone() } else { sender_info.to_string() },
-                                to_user: if is_sent_by_me { with_user.clone() } else { self.username.clone() },
-                                content: content.to_string(),
-                                timestamp: "".to_string(),
-                                is_sent_by_me,
-                            })
-                        } else {
-                            None
-                        }
-                    }
-                }).collect();
-                
-                println!("[DEBUG] Loaded {} messages for chat with {}", self.private_messages.len(), with_user);
-                for msg in &self.private_messages {
-                    println!("[DEBUG] Message: from={}, content={}, is_sent_by_me={}, timestamp={}", 
-                             msg.from_user, msg.content, msg.is_sent_by_me, msg.timestamp);
+                                _ => Message::FriendRequestsLoaded { requests: vec![] }
+                            }
+                        },
+                        |msg| msg,
+                    )
+                } else {
+                    return Command::none();
                 }
             }
-            _ => {}
+            Message::OpenCreateGroup => {
+                self.app_state = AppState::CreateGroup;
+                self.create_group_name.clear();
+                self.selected_participants.clear();
+                self.users_search_query.clear();
+                self.users_search_results.clear();
+                
+                // Auto-load all users for participant selection
+                let svc = chat_service.clone();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                
+                return Command::perform(
+                    async move {
+                        match UsersService::list_all(&svc, &host).await {
+                            Ok(users) => Message::UsersListLoaded { kind: "CreateGroup".to_string(), list: users },
+                            Err(_) => Message::UsersListLoaded { kind: "CreateGroup".to_string(), list: vec![] },
+                        }
+                    },
+                    |msg| msg,
+                );
+            }
+            Message::OpenMyGroups => {
+                self.app_state = AppState::MyGroups;
+                self.loading_groups = true;
+                self.my_groups.clear();
+                
+                // Load user's groups
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/my_groups {}", token_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK: My groups:") {
+                                        let groups_part = response.trim_start_matches("OK: My groups:").trim();
+                                        let groups: Vec<(String, String, usize)> = if groups_part.is_empty() {
+                                            vec![]
+                                        } else {
+                                            groups_part.split(',').filter_map(|s| {
+                                                let s = s.trim();
+                                                if let Some((id, name)) = s.split_once(':') {
+                                                    // For now, set member count to 1 (will be improved with server support)
+                                                    Some((id.to_string(), name.to_string(), 1))
+                                                } else {
+                                                    None
+                                                }
+                                            }).collect()
+                                        };
+                                        Message::MyGroupsLoaded { groups }
+                                    } else {
+                                        Message::MyGroupsLoaded { groups: vec![] }
+                                    }
+                                }
+                                Err(_) => Message::MyGroupsLoaded { groups: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::OpenInviteToGroup { group_id, group_name } => {
+                self.app_state = AppState::InviteToGroup { group_id: group_id.clone(), group_name };
+                self.users_search_query.clear();
+                self.users_search_results.clear();
+                
+                // Auto-load all users for invitation
+                let svc = chat_service.clone();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+        let _host = format!("{}:{}", cfg.default_host, cfg.default_port);
+        let group_id_for_filter = group_id.clone();
+        let token_clone = self.session_token.clone().unwrap_or_default();
+                
+                return Command::perform(
+                    async move {
+                        // Get all users and group members to filter
+                        let all_users = UsersService::list_all(&svc, &host).await.unwrap_or_default();
+                        
+                        // Get group members to filter them out
+                        let mut guard = svc.lock().await;
+            let group_members_resp = guard.send_command(&host, format!("/group_members {} {}", token_clone, group_id_for_filter)).await.unwrap_or_default();
+                        drop(guard);
+                        
+                        // Parse group members (assuming format "OK: Members: user1, user2")
+                        let existing_members: Vec<String> = if group_members_resp.starts_with("OK: Members:") {
+                            group_members_resp.trim_start_matches("OK: Members:").trim()
+                                .split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                        } else {
+                            vec![]
+                        };
+                        
+                        // Filter out existing members
+                        let filtered_users: Vec<String> = all_users.into_iter()
+                            .filter(|user| !existing_members.contains(user))
+                            .collect();
+                        
+                        Message::UsersListLoaded { kind: "Invite".to_string(), list: filtered_users }
+                    },
+                    |msg| msg,
+                );
+            }
+            Message::OpenSendFriendRequest => {
+                self.app_state = AppState::SendFriendRequest;
+                self.users_search_query.clear();
+                self.users_search_results.clear();
+                
+                // Auto-load all users for friend request
+                let svc = chat_service.clone();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                
+                return Command::perform(
+                    async move {
+                        match UsersService::list_all(&svc, &host).await {
+                            Ok(users) => Message::UsersListLoaded { kind: "FriendRequest".to_string(), list: users },
+                            Err(_) => Message::UsersListLoaded { kind: "FriendRequest".to_string(), list: vec![] },
+                        }
+                    },
+                    |msg| msg,
+                );
+            }
+            Message::OpenViewFriends => {
+                self.app_state = AppState::ViewFriends;
+                self.loading = true;
+                
+                // Load user's friends
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/list_friends {}", token_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK: Friends:") {
+                                        let friends_part = response.trim_start_matches("OK: Friends:").trim();
+                                        let friends: Vec<String> = if friends_part.is_empty() {
+                                            vec![]
+                                        } else {
+                                            friends_part.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                                        };
+                                        Message::FriendsLoaded { friends }
+                                    } else {
+                                        Message::FriendsLoaded { friends: vec![] }
+                                    }
+                                }
+                                Err(_) => Message::FriendsLoaded { friends: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::OpenFriendRequests => {
+                self.app_state = AppState::FriendRequests;
+                self.loading = true;
+                
+                // Load user's friend requests
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/received_friend_requests {}", token_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK: Richieste ricevute:") {
+                                        let requests_part = response.trim_start_matches("OK: Richieste ricevute:").trim();
+                                        let requests: Vec<(String, String)> = if requests_part.is_empty() {
+                                            vec![]
+                                        } else {
+                                            requests_part.split(" | ").filter_map(|s| {
+                                                if let Some((username, message)) = s.trim().split_once(':') {
+                                                    Some((username.trim().to_string(), message.trim().to_string()))
+                                                } else {
+                                                    None
+                                                }
+                                            }).collect()
+                                        };
+                                        Message::FriendRequestsLoaded { requests }
+                                    } else {
+                                        Message::FriendRequestsLoaded { requests: vec![] }
+                                    }
+                                }
+                                Err(_) => Message::FriendRequestsLoaded { requests: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::RejectFriendRequestFromUser { username } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/reject_friend_request {} {}", token_clone, username)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::FriendRequestResult { 
+                                            success: true, 
+                                            message: format!("Friend request from {} rejected.", username) 
+                                        }
+                                    } else {
+                                        Message::FriendRequestResult { 
+                                            success: false, 
+                                            message: response 
+                                        }
+                                    }
+                                }
+                                Err(e) => Message::FriendRequestResult { 
+                                    success: false, 
+                                    message: format!("Error rejecting friend request: {}", e) 
+                                },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::FriendsLoaded { friends } => {
+                self.loading = false;
+                self.friends_list = friends;
+            }
+            Message::FriendRequestsLoaded { requests } => {
+                self.loading = false;
+                self.friend_requests = requests;
+            }
+            Message::FriendRequestResult { success, message } => {
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message: message.clone(),
+                });
+                
+                // Auto-clear logger after 2 seconds
+                return Command::perform(
+                    async move {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        Message::ClearLog
+                    },
+                    |msg| msg,
+                );
+            }
+            Message::InviteToGroupResult { success, message } => {
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message: message.clone(),
+                });
+                
+                // Auto-clear logger after 2 seconds
+                return Command::perform(
+                    async move {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        Message::ClearLog
+                    },
+                    |msg| msg,
+                );
+            }
+            Message::GroupInviteActionResult { success, message } => {
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message: message.clone(),
+                });
+                
+                // Auto-clear logger after 2 seconds and refresh if successful
+                if success {
+                    return Command::batch([
+                        Command::perform(
+                            async move {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                                Message::ClearLog
+                            },
+                            |msg| msg,
+                        ),
+                        Command::perform(
+                            async move { Message::OpenMyGroupInvites },
+                            |msg| msg,
+                        )
+                    ]);
+                } else {
+                    return Command::perform(
+                        async move {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            Message::ClearLog
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::CreateGroupInputChanged(name) => {
+                self.create_group_name = name;
+            }
+            Message::ToggleParticipant(username) => {
+                if self.selected_participants.contains(&username) {
+                    self.selected_participants.remove(&username);
+                } else {
+                    self.selected_participants.insert(username);
+                }
+            }
+            Message::RemoveParticipant(username) => {
+                self.selected_participants.remove(&username);
+            }
+            Message::CreateGroupSubmit => {
+                if !self.create_group_name.trim().is_empty() && !self.selected_participants.is_empty() {
+                    if let Some(token) = &self.session_token {
+                        let svc = chat_service.clone();
+                        let token_clone = token.clone();
+                        let name_clone = self.create_group_name.trim().to_string();
+                        let participants = self.selected_participants.clone();
+                        let cfg = crate::server::config::ClientConfig::from_env();
+                        let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                        
+                        self.loading = true;
+                        
+                        return Command::perform(
+                            async move {
+                                let mut guard = svc.lock().await;
+                                let participants_str = participants.into_iter().collect::<Vec<_>>().join(",");
+                                match guard.send_command(&host, format!("/create_group {} {} {}", token_clone, name_clone, participants_str)).await {
+                                    Ok(response) => {
+                                        if response.starts_with("OK:") {
+                                            // Extract group ID from response if available, otherwise use name as ID
+                                            let group_id = uuid::Uuid::new_v4().to_string(); // Temporary ID
+                                            Message::GroupCreated { group_id, group_name: name_clone }
+                                        } else {
+                                            Message::LogError(response)
+                                        }
+                                    }
+                                    Err(e) => Message::LogError(format!("Errore nella creazione del gruppo: {}", e)),
+                                }
+                            },
+                            |msg| msg,
+                        );
+                    }
+                }
+            }
+            Message::GroupCreated { group_id, group_name } => {
+                self.loading = false;
+                self.logger.push(LogMessage {
+                    level: LogLevel::Success,
+                    message: format!("Gruppo '{}' creato con successo!", group_name),
+                });
+                
+                // Navigate to the newly created group
+                return Command::perform(
+                    async move { Message::OpenGroupChat(group_id, group_name) },
+                    |msg| msg,
+                );
+            }
+            Message::MyGroupsLoaded { groups } => {
+                self.loading_groups = false;
+                self.my_groups = groups;
+            }
+            Message::InviteUserToGroup { group_id, username } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let group_id_clone = group_id.clone();
+                    let username_clone = username.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/invite {} {} {}", token_clone, username_clone, group_id_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::InviteToGroupResult { 
+                                            success: true, 
+                                            message: format!("Invito inviato a {} con successo!", username_clone) 
+                                        }
+                                    } else {
+                                        Message::InviteToGroupResult { 
+                                            success: false, 
+                                            message: response 
+                                        }
+                                    }
+                                }
+                                Err(e) => Message::InviteToGroupResult { 
+                                    success: false, 
+                                    message: format!("Errore nell'invio dell'invito: {}", e) 
+                                },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::InviteToGroupResult { success, message } => {
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message,
+                });
+            }
+            Message::OpenMyGroupInvites => {
+                self.app_state = AppState::MyGroupInvites;
+                self.loading_invites = true;
+                self.my_group_invites.clear();
+                
+                // Load user's group invites
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/my_group_invites {}", token_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK: Group invites:") {
+                                        let invites_part = response.trim_start_matches("OK: Group invites:").trim();
+                                        let invites: Vec<(i64, String, String)> = if invites_part.is_empty() {
+                                            vec![]
+                                        } else {
+                                            invites_part.split(" | ").filter_map(|s| {
+                                                let parts: Vec<&str> = s.trim().split(':').collect();
+                                                if parts.len() == 3 {
+                                                    if let Ok(invite_id) = parts[0].parse::<i64>() {
+                                                        Some((invite_id, parts[1].to_string(), parts[2].to_string()))
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                }
+                                            }).collect()
+                                        };
+                                        Message::MyGroupInvitesLoaded { invites }
+                                    } else {
+                                        Message::MyGroupInvitesLoaded { invites: vec![] }
+                                    }
+                                }
+                                Err(_) => Message::MyGroupInvitesLoaded { invites: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::MyGroupInvitesLoaded { invites } => {
+                self.loading_invites = false;
+                self.my_group_invites = invites;
+            }
+            Message::AcceptGroupInvite { invite_id } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/accept_group_invite {} {}", token_clone, invite_id)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::GroupInviteActionResult { 
+                                            success: true, 
+                                            message: "Invito accettato! Ora fai parte del gruppo.".to_string() 
+                                        }
+                                    } else {
+                                        Message::GroupInviteActionResult { 
+                                            success: false, 
+                                            message: response 
+                                        }
+                                    }
+                                }
+                                Err(e) => Message::GroupInviteActionResult { 
+                                    success: false, 
+                                    message: format!("Errore nell'accettazione dell'invito: {}", e) 
+                                },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::RejectGroupInvite { invite_id } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/reject_group_invite {} {}", token_clone, invite_id)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::GroupInviteActionResult { 
+                                            success: true, 
+                                            message: "Invito rifiutato.".to_string() 
+                                        }
+                                    } else {
+                                        Message::GroupInviteActionResult { 
+                                            success: false, 
+                                            message: response 
+                                        }
+                                    }
+                                }
+                                Err(e) => Message::GroupInviteActionResult { 
+                                    success: false, 
+                                    message: format!("Errore nel rifiuto dell'invito: {}", e) 
+                                },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::UsersSearchQueryChanged(query) => {
+                self.users_search_query = query;
+            }
+            Message::UsersSearch => {
+                // Trigger search based on current query
+                if !self.users_search_query.is_empty() {
+                    let svc = chat_service.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let query = self.users_search_query.clone();
+                    // Clone current username so the async block does not borrow &self
+                    let current_username = self.username.clone();
+
+                    return Command::perform(
+                        async move {
+                            // For now, just return all users and filter client-side
+                            match UsersService::list_all(&svc, &host).await {
+                                Ok(users) => {
+                                    let filtered: Vec<String> = users.into_iter()
+                                        .filter(|u| u.to_lowercase().contains(&query.to_lowercase()))
+                                        .filter(|u| u != &current_username) // Remove current user from search results
+                                        .collect();
+                                    Message::UsersListLoaded { kind: "Search".to_string(), list: filtered }
+                                }
+                                Err(_) => Message::UsersListLoaded { kind: "Search".to_string(), list: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::UsersListLoaded { kind: _, list } => {
+                // Filter out current user from all user lists
+                self.users_search_results = list.into_iter()
+                    .filter(|u| u != &self.username)
+                    .collect();
+            }
+            Message::ListOnlineUsers => {
+                return Command::perform(
+                    async { Message::OpenUsersList { kind: "Online".to_string() } },
+                    |msg| msg,
+                );
+            }
+            Message::ListAllUsers => {
+                return Command::perform(
+                    async { Message::OpenUsersList { kind: "All".to_string() } },
+                    |msg| msg,
+                );
+            }
+            Message::MyGroups => {
+                return Command::perform(
+                    async { Message::OpenMyGroups },
+                    |msg| msg,
+                );
+            }
+            Message::CreateGroup { name: _ } => {
+                return Command::perform(
+                    async { Message::OpenCreateGroup },
+                    |msg| msg,
+                );
+            }
+            Message::MessageInputChanged(input) => {
+                self.current_message_input = input;
+            }
+            Message::SendPrivateMessage { to } => {
+                if !self.current_message_input.trim().is_empty() {
+                    if let Some(token) = &self.session_token {
+                        let svc = chat_service.clone();
+                        let token_clone = token.clone();
+                        let to_clone = to.clone();
+                        let message = self.current_message_input.trim().to_string();
+                        let cfg = crate::server::config::ClientConfig::from_env();
+                        let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                        
+                        // Clear input immediately for better UX
+                        // If we don't have the chat history cached yet, mark it as loading
+                        if !self.private_chats.contains_key(&to) {
+                            self.loading_private_chats.insert(to.clone());
+                        }
+
+                        self.current_message_input.clear();
+                        
+                        return Command::batch([
+                            Command::perform(
+                                async move {
+                                    let mut guard = svc.lock().await;
+                                    let _ = guard.send_private_message(&host, &token_clone, &to_clone, &message).await;
+                                    Message::TriggerImmediateRefresh { with: to_clone }
+                                },
+                                |msg| msg,
+                            ),
+                            // Auto-scroll to bottom after sending
+                            scrollable::snap_to(
+                                scrollable::Id::new("messages_scroll"),
+                                scrollable::RelativeOffset::END
+                            )
+                        ]);
+                    }
+                }
+            }
+            Message::SendGroupMessage { group_id } => {
+                if !self.current_message_input.trim().is_empty() {
+                    if let Some(token) = &self.session_token {
+                        let svc = chat_service.clone();
+                        let token_clone = token.clone();
+                        let group_id_clone = group_id.clone();
+                        let message = self.current_message_input.trim().to_string();
+                        let cfg = crate::server::config::ClientConfig::from_env();
+                        let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                        
+                        // Clear input immediately for better UX
+                        // If we don't have the chat history cached yet, mark it as loading
+                        if !self.group_chats.contains_key(&group_id) {
+                            self.loading_group_chats.insert(group_id.clone());
+                        }
+
+                        self.current_message_input.clear();
+                        
+                        return Command::batch([
+                            Command::perform(
+                                async move {
+                                    let mut guard = svc.lock().await;
+                                    let _ = guard.send_group_message(&host, &token_clone, &group_id_clone, &message).await;
+                                    Message::TriggerImmediateGroupRefresh { group_id: group_id_clone }
+                                },
+                                |msg| msg,
+                            ),
+                            // Auto-scroll to bottom after sending
+                            scrollable::snap_to(
+                                scrollable::Id::new("group_messages_scroll"),
+                                scrollable::RelativeOffset::END
+                            )
+                        ]);
+                    }
+                }
+            }
+            Message::LoadGroupMessages { group_id } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let group_id_clone = group_id.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.get_group_messages(&host, &token_clone, &group_id_clone).await {
+                                Ok(messages) => Message::GroupMessagesLoaded { group_id: group_id_clone, messages },
+                                Err(_) => Message::GroupMessagesLoaded { group_id: group_id_clone, messages: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::GroupMessagesLoaded { group_id, messages } => {
+                self.group_chats.insert(group_id.clone(), messages);
+                self.loading_group_chats.remove(&group_id);
+                
+                // Auto-scroll to bottom when messages are loaded
+                if let AppState::GroupChat(current_group_id, _) = &self.app_state {
+                    if current_group_id == &group_id {
+                        return scrollable::snap_to(
+                            scrollable::Id::new("group_messages_scroll"),
+                            scrollable::RelativeOffset::END
+                        );
+                    }
+                }
+            }
+            Message::LoadPrivateMessages { with } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let with_clone = with.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.get_private_messages(&host, &token_clone, &with_clone).await {
+                                Ok(messages) => Message::PrivateMessagesLoaded { with: with_clone, messages },
+                                Err(_) => Message::PrivateMessagesLoaded { with: with_clone, messages: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::PrivateMessagesLoaded { with, messages } => {
+                self.private_chats.insert(with.clone(), messages);
+                self.loading_private_chats.remove(&with);
+                
+                // Auto-scroll to bottom when messages are loaded (for recipient)
+                if let AppState::PrivateChat(current_chat) = &self.app_state {
+                    if current_chat == &with {
+                        return scrollable::snap_to(
+                            scrollable::Id::new("messages_scroll"),
+                            scrollable::RelativeOffset::END
+                        );
+                    }
+                }
+            }
+            // Placeholder implementations for other messages
+            _ => {
+                // Handle other messages as needed
+            }
         }
-        iced::Command::none()
+
+        Command::none()
     }
 }
