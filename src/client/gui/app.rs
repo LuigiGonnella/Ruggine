@@ -164,8 +164,10 @@ impl Application for ChatApp {
                 }
             }
             Msg::StopGroupMessagePolling => {
+                // Stop group polling and return to main actions view
                 self.state.group_polling_active = false;
-                    return Command::<Message>::none();
+                self.state.app_state = AppState::MainActions;
+                return Command::<Message>::none();
             }
             Msg::NewGroupMessagesReceived { group_id, messages } => {
                 if self.state.group_polling_active {
@@ -216,8 +218,10 @@ impl Application for ChatApp {
                 );
             }
             Msg::StopMessagePolling => {
+                // Stop polling and return to main actions view
                 self.state.polling_active = false;
-                    return Command::<Message>::none();
+                self.state.app_state = AppState::MainActions;
+                return Command::<Message>::none();
             }
             Msg::NewMessagesReceived { with, messages } => {
                 if self.state.polling_active {

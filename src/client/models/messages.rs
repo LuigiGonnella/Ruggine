@@ -20,7 +20,6 @@ pub enum Message {
     ToggleShowPassword,
     // UI navigation and test actions for messaging features
     OpenFriendRequests,
-    OpenMainActions,
     OpenPrivateChat(String),
     OpenGroupChat(String, String),
     OpenUsersList { kind: String },
