@@ -22,7 +22,7 @@ use crate::client::gui::views::registration::HostType;
 use crate::client::gui::views::logger::LogMessage;
 
 use crate::server::config::ClientConfig;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
@@ -54,6 +54,8 @@ pub struct ChatAppState {
     pub users_search_query: String,
     // Private chat state
     pub private_chats: HashMap<String, Vec<ChatMessage>>,
+    // Chats currently loading history (shows loader in UI)
+    pub loading_private_chats: HashSet<String>,
     // pub message_receiver: Option<mpsc::UnboundedReceiver<(String, Vec<ChatMessage>)>>,
     pub current_message_input: String,
     pub polling_active: bool, // true se sei in chat
@@ -315,6 +317,8 @@ impl ChatAppState {
 
                 // Carica sempre la history all'ingresso
                 if let Some(token) = self.session_token.clone() {
+                    // mark as loading so the UI shows the loader while history is fetched
+                    self.loading_private_chats.insert(username_clone.clone());
                     let cfg = ClientConfig::from_env();
                     let host = match self.selected_host {
                         HostType::Localhost => format!("{}:{}", cfg.default_host, cfg.default_port),
@@ -345,7 +349,9 @@ impl ChatAppState {
                 // Ordina i messaggi per timestamp prima di inserirli
                 let mut sorted_messages = messages;
                 sorted_messages.sort_by_key(|m| m.sent_at);
-                self.private_chats.insert(with, sorted_messages);
+                self.private_chats.insert(with.clone(), sorted_messages);
+                // stop showing loader for this chat
+                self.loading_private_chats.remove(&with);
             }
             Msg::MessageInputChanged(input) => {
                 self.current_message_input = input;
@@ -365,6 +371,12 @@ impl ChatAppState {
                         let message_content = self.current_message_input.clone();
                         let sender = self.username.clone();
                         
+                        // If there's no cached history, mark the chat as loading so the UI shows loader
+                        let had_history = self.private_chats.get(&to_clone).is_some();
+                        if !had_history {
+                            self.loading_private_chats.insert(to_clone.clone());
+                        }
+
                         // Aggiungi immediatamente il messaggio alla cache locale (ottimistic update)
                         let now = chrono::Utc::now();
                         let chat_message = ChatMessage {

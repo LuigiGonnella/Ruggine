@@ -148,6 +148,8 @@ impl Application for ChatApp {
                 if self.state.polling_active {
                     println!("[APP] NewMessagesReceived for {}: {} messages", with, messages.len());
                     self.state.private_chats.insert(with.clone(), messages.to_vec());
+                    // clear loading flag when messages arrive
+                    self.state.loading_private_chats.remove(&with);
                     
                     // Continue polling
                     let svc = self.chat_service.clone();
