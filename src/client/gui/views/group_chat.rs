@@ -77,7 +77,7 @@ fn build_messages_area<'a>(state: &'a ChatAppState, group_id: &'a str) -> Elemen
     let mut messages_column = Column::new().spacing(8).padding([12, 16]);
 
     // Check if messages are discarded for this group
-    if state.discarded_group_chats.contains(group_id) {
+    if state.discarded_group_chats.contains_key(group_id) {
         messages_column = messages_column.push(
             Container::new(
                 Text::new("Messages discarded locally. Other participants can still see them.")

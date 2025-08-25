@@ -82,6 +82,30 @@ pub fn view<'a>(state: &'a ChatAppState, username: &'a str) -> Element<'a, Messa
 fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Element<'a, Message> {
     let mut messages_column = Column::new().spacing(8).padding([12, 16]);
 
+    // Check if messages are discarded for this user
+    if state.discarded_private_chats.contains_key(username) {
+        messages_column = messages_column.push(
+            Container::new(
+                Text::new("Messages discarded locally. Other participant can still see them.")
+                    .size(14)
+                    .style(TEXT_SECONDARY)
+            )
+            .width(Length::Fill)
+            .center_x()
+            .padding(20)
+        );
+        return Container::new(Scrollable::new(messages_column))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(iced::theme::Container::Custom(Box::new(|_: &iced::Theme| {
+                iced::widget::container::Appearance {
+                    background: Some(iced::Background::Color(CHAT_BG)),
+                    ..Default::default()
+                }
+            })))
+            .into();
+    }
+
     // Show cached messages or appropriate placeholder
     if let Some(chat_messages) = state.private_chats.get(username) {
         if chat_messages.is_empty() {
