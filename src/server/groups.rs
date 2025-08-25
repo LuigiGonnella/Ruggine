@@ -225,7 +225,10 @@ pub async fn my_invites(db: Arc<Database>, user_id: &str) -> String {
                     r.get::<String,_>("invited_by")
                 )
             }).collect();
-            format!("OK: Group invites: {}", invites.join(" | "))
+            // Remove duplicates by converting to HashSet and back
+            let unique_invites: std::collections::HashSet<String> = invites.into_iter().collect();
+            let unique_vec: Vec<String> = unique_invites.into_iter().collect();
+            format!("OK: Group invites: {}", unique_vec.join(" | "))
         }
         Err(e) => {
             println!("[GROUPS] Error listing invites: {}", e);
