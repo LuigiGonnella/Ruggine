@@ -110,6 +110,6 @@ ENTRYPOINT ["/usr/local/bin/ruggine-server"]
 
 ## Licenza e contatti
 - Inserire il file `LICENSE` nella root per chiarire termini di utilizzo (MIT/Apache-2.0 consigliate).
-- Mantainer: Luigi Gonnella — apri issue o PR nel repository per domande tecniche.
+- Mantainers: Luigi Gonnella & Dorotea Monaco — apri issue o PR nel repository per domande tecniche.
 
 ---
