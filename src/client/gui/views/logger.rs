@@ -53,21 +53,35 @@ impl LogMessage {
 pub fn logger_view(messages: &[LogMessage]) -> Element<'_, crate::client::models::messages::Message> {
     // Show only the latest message as an alert bar (single message at a time)
     if let Some(log) = messages.iter().rev().next() {
-        let row = Row::new()
-            .spacing(12)
-            .push(
-                Text::new(log.emoji())
-                    .font(Font::with_name("Segoe UI Emoji"))
-                    .size(20)
-                    .style(log.color())
-            )
-            .push(Text::new(&log.message).size(18).style(log.color()));
-
-        Container::new(row)
-            .padding([8, 16])
-            .width(Length::Fill)
-            .style(iced::theme::Container::Box)
-            .into()
+        Container::new(
+            Row::new()
+                .spacing(12)
+                .push(
+                    Text::new(log.emoji())
+                        .font(Font::with_name("Segoe UI Emoji"))
+                        .size(20)
+                        .style(log.color())
+                )
+                .push(Text::new(&log.message).size(18).style(log.color()))
+        )
+        .padding([12, 16])
+        .width(Length::Fill)
+        .style(iced::theme::Container::Custom(Box::new(move |_: &iced::Theme| {
+            iced::widget::container::Appearance {
+                background: Some(iced::Background::Color(log.color())),
+                text_color: Some(iced::Color::WHITE),
+                border: iced::Border {
+                    radius: 8.0.into(),
+                    ..Default::default()
+                },
+                shadow: iced::Shadow {
+                    offset: iced::Vector::new(0.0, 4.0),
+                    blur_radius: 12.0,
+                    color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.3),
+                },
+            }
+        })))
+        .into()
     } else {
         // Empty placeholder
         iced::widget::Space::new(iced::Length::Fill, iced::Length::Fixed(0.0)).into()
