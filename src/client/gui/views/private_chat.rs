@@ -1,5 +1,5 @@
 use iced::{Element, Length, Alignment, Color, Font};
-use iced::widget::{Column, Row, Text, TextInput, Button, Container, Scrollable, Space};
+use iced::widget::{Column, Row, Text, TextInput, Button, Container, Scrollable, Space, scrollable};
 use crate::client::models::messages::Message;
 use crate::client::models::app_state::{ChatAppState};
 
@@ -128,11 +128,12 @@ fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Elemen
     messages_column = messages_column.push(Space::new(Length::Fixed(0.0), Length::Fixed(20.0)));
 
     // Scrollable container per i messaggi
-    Container::new(
-        Scrollable::new(messages_column)
+    let scrollable_messages = Scrollable::new(messages_column)
             .width(Length::Fill)
             .height(Length::Fill)
-    )
+            .id(scrollable::Id::new("messages_scroll"));
+
+    Container::new(scrollable_messages)
     .width(Length::Fill)
     .height(Length::Fill)
     .style(iced::theme::Container::Custom(Box::new(|_: &iced::Theme| {
