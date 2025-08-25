@@ -273,6 +273,35 @@ impl Application for ChatApp {
             }
             _ => {}
         }
+        
+        // Handle friend request sending
+        if let Msg::SendFriendRequestToUser { username, message } = &message {
+            let cfg = crate::server::config::ClientConfig::from_env();
+            let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+            let token = self.state.session_token.clone().unwrap_or_default();
+            let svc = self.chat_service.clone();
+            let username_clone = username.clone();
+            let message_clone = message.clone();
+            
+            return Command::perform(
+                async move {
+                    let mut guard = svc.lock().await;
+                    let cmd = format!("/send_friend_request {} {} {}", token, username_clone, message_clone);
+                    match guard.send_command(&host, cmd).await {
+                        Ok(response) => {
+                            if response.starts_with("OK:") {
+                                Msg::FriendRequestResult { success: true, message: "Friend request sent successfully!".to_string() }
+                            } else {
+                                Msg::FriendRequestResult { success: false, message: response }
+                            }
+                        }
+                        Err(e) => Msg::FriendRequestResult { success: false, message: format!("Error: {}", e) }
+                    }
+                },
+                |msg| msg,
+            );
+        }
+        
         self.state.update(message, &self.chat_service)
     }
 
