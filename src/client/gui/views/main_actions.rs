@@ -193,12 +193,12 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
     );
 
     let invites_card = action_card(
-        "✉️", 
-        "Invites", 
-        "See pending invites and accept or reject", 
-        "View Invites", 
-        Message::GetGroupMessagesTest, 
-        Some(("Send Invites", Message::SendGroupMessageTest))
+        "✉️",
+        "Invites to groups",
+        "See pending group invites and accept or reject",
+        "View Invites",
+        Message::OpenMyGroupInvites,
+        None
     );
 
     let friends_card = action_card(

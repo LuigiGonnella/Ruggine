@@ -86,4 +86,10 @@ pub enum Message {
     MyGroupsLoaded { groups: Vec<(String, String, usize)> }, // (id, name, member_count)
     InviteUserToGroup { group_id: String, username: String },
     InviteToGroupResult { success: bool, message: String },
+    // Group invites management
+    OpenMyGroupInvites,
+    MyGroupInvitesLoaded { invites: Vec<(i64, String, String)> }, // (invite_id, group_name, invited_by)
+    AcceptGroupInvite { invite_id: i64 },
+    RejectGroupInvite { invite_id: i64 },
+    GroupInviteActionResult { success: bool, message: String },
 }

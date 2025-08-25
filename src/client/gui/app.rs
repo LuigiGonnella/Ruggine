@@ -217,6 +217,7 @@ impl Application for ChatApp {
             AppState::CreateGroup => crate::client::gui::views::create_group::view(&self.state),
             AppState::MyGroups => crate::client::gui::views::my_groups::view(&self.state),
             AppState::InviteToGroup { group_id, group_name } => crate::client::gui::views::invite_to_group::view(&self.state, group_id, group_name),
+            AppState::MyGroupInvites => crate::client::gui::views::my_group_invites::view(&self.state),
         }
     }
 }

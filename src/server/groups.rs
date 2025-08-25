@@ -145,7 +145,7 @@ pub async fn invite_user_to_group(db: Arc<Database>, from_user_id: &str, to_user
         .await;
     let to_user_id = match user_row {
         Ok(Some(row)) => row.get::<String,_>("id"),
-        _ => return "ERR: Group not found".to_string(),
+        _ => return "ERR: User not found".to_string(),
     };
     
     // Verify that from_user is member of the group
@@ -174,36 +174,56 @@ pub async fn invite_user_to_group(db: Arc<Database>, from_user_id: &str, to_user
         return "ERR: User is already a member of this group".to_string();
     }
     
-    // Add user directly to group (simplified - no invite system for now)
-    let created_at = chrono::Utc::now().timestamp();
-    let res = sqlx::query("INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)")
+    // Check if there's already a pending invite
+    let existing_invite = sqlx::query("SELECT 1 FROM group_invites WHERE group_id = ? AND invited_user_id = ? AND status = 'pending'")
         .bind(&group_id)
         .bind(&to_user_id)
+        .fetch_optional(&db.pool)
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+    if existing_invite {
+        return "ERR: User already has a pending invite to this group".to_string();
+    }
+    
+    // Create group invite
+    let created_at = chrono::Utc::now().timestamp();
+    let res = sqlx::query("INSERT INTO group_invites (group_id, invited_user_id, invited_by, created_at, status) VALUES (?, ?, ?, ?, 'pending')")
+        .bind(&group_id)
+        .bind(&to_user_id)
+        .bind(from_user_id)
         .bind(created_at)
         .execute(&db.pool)
         .await;
     match res {
         Ok(_) => {
-            println!("[GROUPS] User {} added to group {}", to_username, group_id);
-            format!("OK: {} added to group successfully", to_username)
+            println!("[GROUPS] Invite sent to {} for group {}", to_username, group_id);
+            format!("OK: Invite sent to {} successfully", to_username)
         }
         Err(e) => {
-            println!("[GROUPS] Error adding user to group: {}", e);
-            format!("ERR: Could not add user to group: {}", e)
+            println!("[GROUPS] Error sending invite: {}", e);
+            format!("ERR: Could not send invite: {}", e)
         }
     }
 }
 
 pub async fn my_invites(db: Arc<Database>, user_id: &str) -> String {
     println!("[GROUPS] List invites for user {}", user_id);
-    let rows = sqlx::query("SELECT id, group_id FROM group_invites WHERE invited_user_id = ? AND status = 'pending'")
+    let rows = sqlx::query("SELECT gi.id, g.name as group_name, u.username as invited_by FROM group_invites gi JOIN groups g ON gi.group_id = g.id JOIN users u ON gi.invited_by = u.id WHERE gi.invited_user_id = ? AND gi.status = 'pending'")
         .bind(user_id)
         .fetch_all(&db.pool)
         .await;
     match rows {
         Ok(rows) => {
-            let invites: Vec<String> = rows.iter().map(|r| format!("{}:{}", r.get::<i64,_>("id"), r.get::<String,_>("group_id"))).collect();
-            format!("OK: My invites: {}", invites.join(", "))
+            let invites: Vec<String> = rows.iter().map(|r| {
+                format!("{}:{}:{}", 
+                    r.get::<i64,_>("id"), 
+                    r.get::<String,_>("group_name"), 
+                    r.get::<String,_>("invited_by")
+                )
+            }).collect();
+            format!("OK: Group invites: {}", invites.join(" | "))
         }
         Err(e) => {
             println!("[GROUPS] Error listing invites: {}", e);

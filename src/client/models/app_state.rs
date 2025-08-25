@@ -21,6 +21,7 @@ pub enum AppState {
     CreateGroup,
     MyGroups,
     InviteToGroup { group_id: String, group_name: String },
+    MyGroupInvites,
 }
 
 impl Default for AppState {
@@ -64,6 +65,8 @@ pub struct ChatAppState {
     pub selected_participants: std::collections::HashSet<String>,
     pub my_groups: Vec<(String, String, usize)>, // (id, name, member_count)
     pub loading_groups: bool,
+    pub my_group_invites: Vec<(i64, String, String)>, // (invite_id, group_name, invited_by)
+    pub loading_invites: bool,
 }
 
 impl ChatAppState {
@@ -445,6 +448,139 @@ impl ChatAppState {
                     level: if success { LogLevel::Success } else { LogLevel::Error },
                     message,
                 });
+            }
+            Message::OpenMyGroupInvites => {
+                self.app_state = AppState::MyGroupInvites;
+                self.loading_invites = true;
+                self.my_group_invites.clear();
+                
+                // Load user's group invites
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/my_group_invites {}", token_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK: Group invites:") {
+                                        let invites_part = response.trim_start_matches("OK: Group invites:").trim();
+                                        let invites: Vec<(i64, String, String)> = if invites_part.is_empty() {
+                                            vec![]
+                                        } else {
+                                            invites_part.split(" | ").filter_map(|s| {
+                                                let parts: Vec<&str> = s.trim().split(':').collect();
+                                                if parts.len() == 3 {
+                                                    if let Ok(invite_id) = parts[0].parse::<i64>() {
+                                                        Some((invite_id, parts[1].to_string(), parts[2].to_string()))
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                }
+                                            }).collect()
+                                        };
+                                        Message::MyGroupInvitesLoaded { invites }
+                                    } else {
+                                        Message::MyGroupInvitesLoaded { invites: vec![] }
+                                    }
+                                }
+                                Err(_) => Message::MyGroupInvitesLoaded { invites: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::MyGroupInvitesLoaded { invites } => {
+                self.loading_invites = false;
+                self.my_group_invites = invites;
+            }
+            Message::AcceptGroupInvite { invite_id } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/accept_group_invite {} {}", token_clone, invite_id)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::GroupInviteActionResult { 
+                                            success: true, 
+                                            message: "Invito accettato! Ora fai parte del gruppo.".to_string() 
+                                        }
+                                    } else {
+                                        Message::GroupInviteActionResult { 
+                                            success: false, 
+                                            message: response 
+                                        }
+                                    }
+                                }
+                                Err(e) => Message::GroupInviteActionResult { 
+                                    success: false, 
+                                    message: format!("Errore nell'accettazione dell'invito: {}", e) 
+                                },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::RejectGroupInvite { invite_id } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/reject_group_invite {} {}", token_clone, invite_id)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::GroupInviteActionResult { 
+                                            success: true, 
+                                            message: "Invito rifiutato.".to_string() 
+                                        }
+                                    } else {
+                                        Message::GroupInviteActionResult { 
+                                            success: false, 
+                                            message: response 
+                                        }
+                                    }
+                                }
+                                Err(e) => Message::GroupInviteActionResult { 
+                                    success: false, 
+                                    message: format!("Errore nel rifiuto dell'invito: {}", e) 
+                                },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::GroupInviteActionResult { success, message } => {
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message,
+                });
+                
+                // Refresh invites list after action
+                if success {
+                    return Command::perform(
+                        async move { Message::OpenMyGroupInvites },
+                        |msg| msg,
+                    );
+                }
             }
             Message::UsersSearchQueryChanged(query) => {
                 self.users_search_query = query;

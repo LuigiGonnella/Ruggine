@@ -241,18 +241,20 @@ impl Server {
                     "ERR: Invalid or expired session".to_string()
                 }
             }
-            "/accept_group_invite" if args.len() == 2 => {
+            "/accept_group_invite" if args.len() >= 2 => {
                 let session_token = args[0];
+                let invite_id = args[1];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
-                    groups::accept_invite(self.db.clone(), &uid, args[1]).await
+                    groups::accept_invite(self.db.clone(), &uid, invite_id).await
                 } else {
                     "ERR: Invalid or expired session".to_string()
                 }
             }
-            "/reject_group_invite" if args.len() == 2 => {
+            "/reject_group_invite" if args.len() >= 2 => {
                 let session_token = args[0];
+                let invite_id = args[1];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {
-                    groups::reject_invite(self.db.clone(), &uid, args[1]).await
+                    groups::reject_invite(self.db.clone(), &uid, invite_id).await
                 } else {
                     "ERR: Invalid or expired session".to_string()
                 }

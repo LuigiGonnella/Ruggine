@@ -8,3 +8,4 @@ pub mod users_list;
 pub mod create_group;
 pub mod my_groups;
 pub mod invite_to_group;
+pub mod my_group_invites;
