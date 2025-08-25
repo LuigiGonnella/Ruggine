@@ -18,6 +18,8 @@ const BOLD_FONT: Font = Font {
     ..Font::DEFAULT
 };
 
+const EMOJI_FONT: Font = Font::with_name("Segoe UI Emoji");
+
 
 pub fn view<'a>(state: &'a ChatAppState, username: &'a str) -> Element<'a, Message> {
     // Header con nome utente e pulsante back
@@ -31,7 +33,7 @@ pub fn view<'a>(state: &'a ChatAppState, username: &'a str) -> Element<'a, Messa
         .push(Text::new("Online").size(12).style(TEXT_SECONDARY))
         .spacing(2);
 
-    let discard_btn = Button::new(Text::new("🗑️").size(16))
+    let discard_btn = Button::new(Text::new("🗑️").font(EMOJI_FONT).size(16))
         .on_press(Message::DiscardPrivateMessages { with: username.to_string() })
         .style(iced::theme::Button::Destructive)
         .padding(8);
