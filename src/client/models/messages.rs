@@ -49,8 +49,6 @@ pub enum Message {
     GroupsListLoaded { groups: Vec<String> },
     // Group invite / membership actions
     InviteToGroup { group_id: String, username: String },
-    AcceptGroupInvite { invite_id: String },
-    RejectGroupInvite { invite_id: String },
     MyGroupInvites,
     JoinGroup { group_id: String },
     LeaveGroup { group_id: String },
