@@ -330,32 +330,44 @@ impl ChatAppState {
                 }
             }
             Message::OpenInviteToGroup { group_id, group_name } => {
-                let group_id_for_filter = group_id.clone();
-                self.app_state = AppState::InviteToGroup { group_id, group_name };
+                self.app_state = AppState::InviteToGroup { group_id: group_id.clone(), group_name };
+                self.users_search_query.clear();
+                self.users_search_results.clear();
                 
-                // Load group members to filter them out from search results
-                if let Some(token) = &self.session_token {
-                    let token_clone = token.clone();
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    let svc = chat_service.clone();
-                    return Command::perform(
-                        async move {
-                            let mut guard = svc.lock().await;
-                            let group_members_resp = guard.send_command(&host, format!("/group_members {} {}", token_clone, group_id_for_filter)).await.unwrap_or_default();
-                            // Parse group members from response
-                            if group_members_resp.starts_with("OK: Group members:") {
-                                let members_str = group_members_resp.trim_start_matches("OK: Group members:").trim();
-                                let members: Vec<String> = members_str.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-                                members
-                            } else {
-                                vec![]
-                            }
-                        },
-                        |members| Message::GroupMembersLoaded { members }
-                    );
-                }
-                Command::none()
+                // Auto-load all users for invitation
+                let svc = chat_service.clone();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                let _host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                let group_id_for_filter = group_id.clone();
+                
+                return Command::perform(
+                    async move {
+                        // Get all users and group members to filter
+                        let all_users = UsersService::list_all(&svc, &host).await.unwrap_or_default();
+                        
+                        // Get group members to filter them out
+                        let mut guard = svc.lock().await;
+                        let group_members_resp = guard.send_command(&host, format!("/group_members {} {}", token, group_id_for_filter)).await.unwrap_or_default();
+                        drop(guard);
+                        
+                        // Parse group members (assuming format "OK: Members: user1, user2")
+                        let existing_members: Vec<String> = if group_members_resp.starts_with("OK: Members:") {
+                            group_members_resp.trim_start_matches("OK: Members:").trim()
+                                .split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                        } else {
+                            vec![]
+                        };
+                        
+                        // Filter out existing members
+                        let filtered_users: Vec<String> = all_users.into_iter()
+                            .filter(|user| !existing_members.contains(user))
+                            .collect();
+                        
+                        Message::UsersListLoaded { kind: "Invite".to_string(), list: filtered_users }
+                    },
+                    |msg| msg,
+                );
             }
             Message::OpenSendFriendRequest => {
                 self.app_state = AppState::SendFriendRequest;
@@ -451,36 +463,43 @@ impl ChatAppState {
                         },
                         |msg| msg,
                     );
+                }
+            }
+            Message::AcceptFriendRequestFromUser { username } => {
+                if let Some(token) = &self.session_token {
                     let token_clone = token.clone();
+                    let username_clone = username.clone();
                     let cfg = crate::server::config::ClientConfig::from_env();
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    
+                    let svc = chat_service.clone();
                     return Command::perform(
                         async move {
                             let mut guard = svc.lock().await;
-                            match guard.send_command(&host, format!("/accept_friend_request {} {}", token_clone, username)).await {
-                                Ok(response) => {
-                                    if response.starts_with("OK:") {
-                                        Message::FriendRequestResult { 
-                                            success: true, 
-                                            message: format!("Friend request from {} accepted!", username) 
-                                        }
-                                    } else {
-                                        Message::FriendRequestResult { 
-                                            success: false, 
-                                            message: response 
-                                        }
+                            match guard.send_command(&host, format!("/accept_friend_request {} {}", token_clone, username_clone)).await {
+                                Ok(resp) if resp.starts_with("OK:") => {
+                                    Message::FriendRequestResult { 
+                                        success: true, 
+                                        message: format!("Friend request from {} accepted!", username_clone)
                                     }
                                 }
-                                Err(e) => Message::FriendRequestResult { 
-                                    success: false, 
-                                    message: format!("Error accepting friend request: {}", e) 
-                                },
+                                Ok(resp) => {
+                                    Message::FriendRequestResult { 
+                                        success: false, 
+                                        message: resp 
+                                    }
+                                }
+                                Err(e) => {
+                                    Message::FriendRequestResult { 
+                                        success: false, 
+                                        message: format!("Error: {}", e) 
+                                    }
+                                }
                             }
                         },
                         |msg| msg,
                     );
                 }
+                Command::none()
             }
             Message::RejectFriendRequestFromUser { username } => {
                 if let Some(token) = &self.session_token {
