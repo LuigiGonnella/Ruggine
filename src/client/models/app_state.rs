@@ -697,12 +697,6 @@ impl ChatAppState {
                     );
                 }
             }
-            Message::InviteToGroupResult { success, message } => {
-                self.logger.push(LogMessage {
-                    level: if success { LogLevel::Success } else { LogLevel::Error },
-                    message,
-                });
-            }
             Message::OpenMyGroupInvites => {
                 self.app_state = AppState::MyGroupInvites;
                 self.loading_invites = true;
