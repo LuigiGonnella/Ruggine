@@ -1131,9 +1131,11 @@ impl ChatAppState {
             // Placeholder implementations for other messages
             _ => {
                 // Handle other messages as needed
-                return Command::none();
+                ()
             }
         }
+        
+        Command::none()
 
         Command::none()
     }
