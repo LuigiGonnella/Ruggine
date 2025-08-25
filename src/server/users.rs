@@ -11,6 +11,19 @@ pub async fn send_friend_request(db: Arc<Database>, from_user_id: &str, to_usern
         Ok(None) => return "ERR: Destinatario non trovato".to_string(),
         Err(e) => return format!("ERR: DB error: {}", e),
     };
+    
+    // Controlla se sono già amici
+    let friendship_check = sqlx::query("SELECT 1 FROM friendships WHERE (user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?)")
+        .bind(from_user_id)
+        .bind(&to_user_id)
+        .bind(&to_user_id)
+        .bind(from_user_id)
+        .fetch_optional(&db.pool)
+        .await;
+    if let Ok(Some(_)) = friendship_check {
+        return "ERR: Siete già amici".to_string();
+    }
+    
     // Controlla se già esiste una richiesta pendente
     let check = sqlx::query("SELECT id FROM friend_requests WHERE from_user_id = ? AND to_user_id = ? AND status = 'pending'")
         .bind(from_user_id)
