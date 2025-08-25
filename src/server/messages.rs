@@ -226,7 +226,17 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
             };
 
             let msgs: Vec<String> = rows.iter().map(|r| {
-                let sender: String = r.get("sender_id");
+                let sender_id: String = r.get("sender_id");
+                // Per i gruppi, converti sender_id in username
+                let sender_name = if let Ok(Some(user_row)) = sqlx::query("SELECT username FROM users WHERE id = ?")
+                    .bind(&sender_id)
+                    .fetch_optional(&db.pool)
+                    .await
+                {
+                    user_row.get::<String, _>("username")
+                } else {
+                    sender_id.clone() // fallback to ID if username not found
+                };
                 let msg: String = r.get("message");
                 let ts: i64 = r.get("sent_at");
                 // Attempt to decrypt; if decryption fails, show placeholder
@@ -234,7 +244,7 @@ pub async fn get_group_messages(db: Arc<Database>, session_token: &str, group_na
                     Ok(s) => s,
                     Err(_) => "[DECRYPTION FAILED]".to_string(),
                 };
-                format!("[{}] {}: {}", ts, sender, clear).into()
+                format!("[{}] {}: {}", ts, sender_name, clear)
             }).collect();
             format!("OK: Messages:\n{}", msgs.join("\n"))
         }

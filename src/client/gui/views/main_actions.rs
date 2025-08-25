@@ -220,7 +220,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .push(friends_card);
 
     // Main content with scrollable area
-    let content = Column::new()
+    let main_content = Column::new()
         .push(header)
         .push(user_info)
         .push(
@@ -232,11 +232,20 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .width(Length::Fill)
         .height(Length::Fill);
 
-    Container::new(
-        content
-    )
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .style(iced::theme::Container::Custom(Box::new(bg_main_appearance)))
-    .into()
+    // Combine main content with logger overlay
+    let final_content = if let Some(logger) = logger_overlay {
+        Column::new()
+            .push(logger)
+            .push(main_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+    } else {
+        main_content
+    };
+
+    Container::new(final_content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(iced::theme::Container::Custom(Box::new(bg_main_appearance)))
+        .into()
 }

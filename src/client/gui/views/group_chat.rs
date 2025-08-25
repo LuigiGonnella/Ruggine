@@ -134,11 +134,29 @@ fn build_messages_area<'a>(state: &'a ChatAppState, group_id: &'a str) -> Elemen
 fn create_message_bubble<'a>(msg: &'a crate::client::models::app_state::ChatMessage, is_my_message: bool) -> Element<'a, Message> {
     let bubble_color = if is_my_message { MY_MESSAGE_BG } else { OTHER_MESSAGE_BG };
 
-    let message_content = Column::new()
+    // For group messages, show sender name if it's not my message
+    let message_header = if !is_my_message {
+        Some(
+            Text::new(&msg.sender)
+                .size(12)
+                .font(BOLD_FONT)
+                .style(Color::from_rgb(0.9, 0.9, 0.9))
+        )
+    } else {
+        None
+    };
+
+    let mut message_content = Column::new().spacing(2);
+    
+    // Add sender name for group messages (only for others' messages)
+    if let Some(header) = message_header {
+        message_content = message_content.push(header);
+    }
+    
+    message_content = message_content
         .push(Text::new(&msg.content).size(14).style(TEXT_PRIMARY))
         .push(Space::new(Length::Fixed(0.0), Length::Fixed(4.0)))
-        .push(Text::new(&msg.formatted_time).size(10).style(TEXT_SECONDARY))
-        .spacing(2);
+        .push(Text::new(&msg.formatted_time).size(10).style(TEXT_SECONDARY));
 
     let bubble = Container::new(message_content)
         .padding([8, 12])

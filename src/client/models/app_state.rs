@@ -985,6 +985,7 @@ impl ChatAppState {
                 }
             }
             Message::GroupMessagesLoaded { group_id, messages } => {
+                println!("[APP_STATE] NewGroupMessagesReceived for {}: {} messages", group_id, messages.len());
                 self.group_chats.insert(group_id.clone(), messages);
                 self.loading_group_chats.remove(&group_id);
                 

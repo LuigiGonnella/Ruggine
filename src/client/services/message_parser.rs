@@ -100,21 +100,21 @@ pub fn parse_group_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static str
                 continue;
             }
             
-            // Expected format: [timestamp] sender_id: message
+            // Expected format: [timestamp] sender_name: message
             if let Some(bracket_end) = line.find(']') {
                 if line.starts_with('[') {
                     let timestamp_str = &line[1..bracket_end];
                     let rest = &line[bracket_end + 1..].trim();
                     
                     if let Some(colon_pos) = rest.find(':') {
-                        let sender_id = rest[..colon_pos].trim().to_string();
+                        let sender_name = rest[..colon_pos].trim().to_string();
                         let content = rest[colon_pos + 1..].trim().to_string();
                         
                         if let Ok(timestamp) = timestamp_str.parse::<i64>() {
                             let formatted_time = format_timestamp(timestamp);
                             
                             messages.push(ChatMessage {
-                                sender: sender_id, // For groups, we show the sender_id (could be enhanced to show username)
+                                sender: sender_name, // Now shows actual username
                                 content,
                                 timestamp,
                                 formatted_time,
