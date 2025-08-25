@@ -268,7 +268,7 @@ impl ChatAppState {
                     let cfg = crate::server::config::ClientConfig::from_env();
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                     let svc = chat_service.clone();
-                    Command::perform(
+                        return Command::perform(
                         async move {
                             let mut guard = svc.lock().await;
                             match guard.send_command(&host, format!("/received_friend_requests {}", token_clone)).await {
@@ -294,7 +294,7 @@ impl ChatAppState {
                         |msg| msg,
                     )
                 } else {
-                    Command::none()
+                    return Command::none();
                 }
             }
             Message::OpenCreateGroup => {
@@ -372,8 +372,9 @@ impl ChatAppState {
                 let svc = chat_service.clone();
                 let cfg = crate::server::config::ClientConfig::from_env();
                 let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                let _host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                let group_id_for_filter = group_id.clone();
+        let _host = format!("{}:{}", cfg.default_host, cfg.default_port);
+        let group_id_for_filter = group_id.clone();
+        let token_clone = self.session_token.clone().unwrap_or_default();
                 
                 return Command::perform(
                     async move {
@@ -382,7 +383,7 @@ impl ChatAppState {
                         
                         // Get group members to filter them out
                         let mut guard = svc.lock().await;
-                        let group_members_resp = guard.send_command(&host, format!("/group_members {} {}", token, group_id_for_filter)).await.unwrap_or_default();
+            let group_members_resp = guard.send_command(&host, format!("/group_members {} {}", token_clone, group_id_for_filter)).await.unwrap_or_default();
                         drop(guard);
                         
                         // Parse group members (assuming format "OK: Members: user1, user2")
@@ -493,35 +494,6 @@ impl ChatAppState {
                                     }
                                 }
                                 Err(_) => Message::FriendRequestsLoaded { requests: vec![] },
-                            }
-                        },
-                        |msg| msg,
-                    );
-                    let token_clone = token.clone();
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    
-                    return Command::perform(
-                        async move {
-                            let mut guard = svc.lock().await;
-                            match guard.send_command(&host, format!("/accept_friend_request {} {}", token_clone, username)).await {
-                                Ok(response) => {
-                                    if response.starts_with("OK:") {
-                                        Message::FriendRequestResult { 
-                                            success: true, 
-                                            message: format!("Friend request from {} accepted!", username) 
-                                        }
-                                    } else {
-                                        Message::FriendRequestResult { 
-                                            success: false, 
-                                            message: response 
-                                        }
-                                    }
-                                }
-                                Err(e) => Message::FriendRequestResult { 
-                                    success: false, 
-                                    message: format!("Error accepting friend request: {}", e) 
-                                },
                             }
                         },
                         |msg| msg,
@@ -1065,7 +1037,7 @@ impl ChatAppState {
                 // Handle other messages as needed
             }
         }
-        
+
         Command::none()
     }
 }

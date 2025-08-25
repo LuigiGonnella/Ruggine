@@ -88,7 +88,7 @@ impl Application for ChatApp {
                 });
                 // Esegui la connessione e invia il comando
                 let svc_outer = self.chat_service.clone();
-                Command::perform(
+                return Command::perform(
                     async move {
                         // Use the persistent ChatService stored in the app
                         let mut guard = svc_outer.lock().await;
@@ -115,7 +115,7 @@ impl Application for ChatApp {
                         }
                     },
                     |msg| msg,
-                )
+                );
             }
             Msg::StartMessagePolling { with } => {
                 if !self.state.polling_active {
@@ -126,7 +126,7 @@ impl Application for ChatApp {
                     let cfg = crate::server::config::ClientConfig::from_env();
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                     let with_clone = with.clone();
-                    Command::perform(
+                    return Command::perform(
                         async move {
                             println!("[APP] Fetching private messages for {}", with_clone);
                             let mut guard = svc.lock().await;
@@ -142,9 +142,9 @@ impl Application for ChatApp {
                             }
                         },
                         |msg| msg,
-                    )
+                    );
                 } else {
-                    Command::none()
+                    return Command::<Message>::none();
                 }
             }
             Msg::StartGroupMessagePolling { group_id } => {
@@ -156,7 +156,7 @@ impl Application for ChatApp {
                     let cfg = crate::server::config::ClientConfig::from_env();
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                     let group_id_clone = group_id.clone();
-                    Command::perform(
+                    return Command::perform(
                         async move {
                             println!("[APP] Fetching group messages for {}", group_id_clone);
                             let mut guard = svc.lock().await;
@@ -172,14 +172,14 @@ impl Application for ChatApp {
                             }
                         },
                         |msg| msg,
-                    )
+                    );
                 } else {
-                    Command::none()
+                    return Command::<Message>::none();
                 }
             }
             Msg::StopGroupMessagePolling => {
                 self.state.group_polling_active = false;
-                Command::none()
+                    return Command::<Message>::none();
             }
             Msg::NewGroupMessagesReceived { group_id, messages } => {
                 if self.state.group_polling_active {
@@ -195,7 +195,7 @@ impl Application for ChatApp {
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                     let group_id_clone = group_id.clone();
                     
-                    Command::perform(
+                    return Command::perform(
                         async move {
                             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                             let mut guard = svc.lock().await;
@@ -211,9 +211,9 @@ impl Application for ChatApp {
                             }
                         },
                         |msg| msg,
-                    )
+                    );
                 } else {
-                    Command::none()
+                    return Command::<Message>::none();
                 }
             }
             Msg::TriggerImmediateGroupRefresh { group_id } => {
@@ -222,17 +222,17 @@ impl Application for ChatApp {
                 let token = self.state.session_token.clone().unwrap_or_default();
                 let svc = self.chat_service.clone();
                 let group_id_cloned = group_id.clone();
-                iced::Command::perform(
+                return iced::Command::perform(
                     async move {
                         let mut guard = svc.lock().await;
                         guard.get_group_messages(&host, &token, &group_id_cloned).await.unwrap_or_default()
                     },
                     move |messages| Msg::NewGroupMessagesReceived { group_id: group_id.clone(), messages }
-                )
+                );
             }
             Msg::StopMessagePolling => {
                 self.state.polling_active = false;
-                Command::none()
+                    return Command::<Message>::none();
             }
             Msg::NewMessagesReceived { with, messages } => {
                 if self.state.polling_active {
@@ -248,7 +248,7 @@ impl Application for ChatApp {
                     let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                     let username = with.clone();
                     
-                    Command::perform(
+                    return Command::perform(
                         async move {
                             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                             let mut guard = svc.lock().await;
@@ -264,9 +264,9 @@ impl Application for ChatApp {
                             }
                         },
                         |msg| msg,
-                    )
+                    );
                 } else {
-                    Command::none()
+                    return Command::<Message>::none();
                 }
             }
             Msg::TriggerImmediateRefresh { with } => {
@@ -275,13 +275,13 @@ impl Application for ChatApp {
                 let token = self.state.session_token.clone().unwrap_or_default();
                 let svc = self.chat_service.clone();
                     let with_cloned = with.clone();
-                    iced::Command::perform(
+                    return iced::Command::perform(
                         async move {
                             let mut guard = svc.lock().await;
                             guard.get_private_messages(&host, &token, &with_cloned).await.unwrap_or_default()
                         },
                         move |messages| Msg::NewMessagesReceived { with: with.clone(), messages }
-                    )
+                    );
             }
             _ => {}
         }
@@ -290,10 +290,7 @@ impl Application for ChatApp {
 
     fn view(&self) -> Element<Message> {
         match &self.state.app_state {
-            AppState::CheckingSession => {
-                // Small placeholder while we validate a persisted session token on startup.
-                iced::widget::Text::new("Controllo sessione...").into()
-            }
+            AppState::CheckingSession => iced::widget::Text::new("Controllo sessione...").into(),
             AppState::Registration => crate::client::gui::views::registration::view(&self.state),
             AppState::MainActions => crate::client::gui::views::main_actions::view(&self.state),
             AppState::PrivateChat(username) => crate::client::gui::views::private_chat::view(&self.state, username),
@@ -304,11 +301,9 @@ impl Application for ChatApp {
             AppState::CreateGroup => crate::client::gui::views::create_group::view(&self.state),
             AppState::MyGroups => crate::client::gui::views::my_groups::view(&self.state),
             AppState::InviteToGroup { group_id, group_name } => crate::client::gui::views::invite_to_group::view(&self.state, group_id, group_name),
-                Command::none()
+            AppState::MyGroupInvites => crate::client::gui::views::my_group_invites::view(&self.state),
+            AppState::SendFriendRequest => crate::client::gui::views::send_friend_request::view(&self.state),
             AppState::ViewFriends => crate::client::gui::views::view_friends::view(&self.state),
         }
-        // Delegate to state update for all other messages
-        let cmd = self.state.update(message, &self.chat_service);
-        cmd
     }
 }
