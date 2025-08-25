@@ -156,88 +156,7 @@ impl ChatAppState {
                         level: LogLevel::Error,
                         message: message.clone(),
                     });
-                    // Remove the processed friend request from the list immediately
-                    // This ensures the UI updates instantly without waiting for reload
-                    // The message will be parsed to extract the username that was processed
-                    if let Some(processed_username) = extract_username_from_friend_action(message) {
-                        self.friend_requests.retain(|(username, _)| username != &processed_username);
-                    }
-                    // Reload friend requests to remove the processed one
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    let token = self.session_token.clone().unwrap_or_default();
-                    let svc = chat_service.clone();
-                    return iced::Command::perform(
-                        async move {
-                            let mut guard = svc.lock().await;
-                            let cmd = format!("/received_friend_requests {}", token);
-                            match guard.send_command(&host, cmd).await {
-                                Ok(response) => {
-                                    if response.starts_with("OK:") {
-                                        // Parse the response to extract friend requests
-                                        let after = response.splitn(3, ':').nth(2).unwrap_or("");
-                                        let requests: Vec<(String, String)> = after
-                                            .split('|')
-                                            .filter_map(|item| {
-                                                let item = item.trim();
-                                                if item.is_empty() { return None; }
-                                                if let Some(colon_pos) = item.find(':') {
-                                                    let username = item[..colon_pos].trim().to_string();
-                                                    let message = item[colon_pos + 1..].trim().to_string();
-                                                    Some((username, message))
-                                                } else {
-                                                    None
-                                                }
-                                            })
-                                            .collect();
-                                        Msg::FriendRequestsLoaded { requests }
-                                    } else {
-                                        Msg::FriendRequestsLoaded { requests: vec![] }
-                                    }
-                                }
-                                Err(_) => Msg::FriendRequestsLoaded { requests: vec![] }
-                            }
-                        },
-                        |msg| msg,
-                    );
-                    // Reload friend requests to update the UI
-                    if let Some(token) = &self.session_token {
-                        let cfg = crate::server::config::ClientConfig::from_env();
-                        let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                        let svc = chat_service.clone();
-                        let token_clone = token.clone();
-                        return Command::perform(
-                            async move {
-                                let mut guard = svc.lock().await;
-                                let cmd = format!("/received_friend_requests {}", token_clone);
-                                match guard.send_command(&host, cmd).await {
-                                    Ok(response) => {
-                                        if response.starts_with("OK:") {
-                                            let requests = if let Some(after) = response.splitn(3, ':').nth(2) {
-                                                after.split('|').filter_map(|s| {
-                                                    let s = s.trim();
-                                                    if s.is_empty() { return None; }
-                                                    if let Some((username, message)) = s.split_once(':') {
-                                                        Some((username.trim().to_string(), message.trim().to_string()))
-                                                    } else {
-                                                        Some((s.to_string(), "".to_string()))
-                                                    }
-                                                }).collect()
-                                            } else {
-                                                vec![]
-                                            };
-                                            Message::FriendRequestsLoaded { requests }
-                                        } else {
-                                            Message::FriendRequestsLoaded { requests: vec![] }
-                                        }
-                                    }
-                                    Err(_) => Message::FriendRequestsLoaded { requests: vec![] }
-                                }
-                            },
-                            |msg| msg,
-                        );
-                    }
-
+                    
                     // Auto-clear error logger after 2 seconds to match other flows
                     return Command::perform(
                         async move {
@@ -636,13 +555,7 @@ impl ChatAppState {
             Message::FriendRequestsLoaded { requests } => {
                 self.loading = false;
                 self.friend_requests = requests;
-            }
-            Message::FriendRequestResult { success, message } => {
-                self.logger.push(LogMessage {
-                    level: if success { LogLevel::Success } else { LogLevel::Error },
-                    message: message.clone(),
-                });
-                
+
                 // Auto-clear logger after 2 seconds
                 return Command::perform(
                     async move {
@@ -651,6 +564,59 @@ impl ChatAppState {
                     },
                     |msg| msg,
                 );
+            }
+            Message::FriendRequestResult { success, message } => {
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message: message.clone(),
+                });
+
+                // Remove the processed friend request from the list immediately
+                    // This ensures the UI updates instantly without waiting for reload
+                    // The message will be parsed to extract the username that was processed
+                    if let Some(processed_username) = extract_username_from_friend_action(&message) {
+                        self.friend_requests.retain(|(username, _)| username != &processed_username);
+                    }
+                    // Reload friend requests to remove the processed one
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    let token = self.session_token.clone().unwrap_or_default();
+                    let svc = chat_service.clone();
+                     return iced::Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            let cmd = format!("/received_friend_requests {}", token);
+                            match guard.send_command(&host, cmd).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        // Parse the response to extract friend requests
+                                        let after = response.splitn(3, ':').nth(2).unwrap_or("");
+                                        let requests: Vec<(String, String)> = after
+                                            .split('|')
+                                            .filter_map(|item| {
+                                                let item = item.trim();
+                                                if item.is_empty() { return None; }
+                                                if let Some(colon_pos) = item.find(':') {
+                                                    let username = item[..colon_pos].trim().to_string();
+                                                    let message = item[colon_pos + 1..].trim().to_string();
+                                                    Some((username, message))
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect();
+                                        Message::FriendRequestsLoaded { requests }
+                                    } else {
+                                        Message::FriendRequestsLoaded { requests: vec![] }
+                                    }
+                                }
+                                Err(_) => Message::FriendRequestsLoaded { requests: vec![] }
+                            }
+                        },
+                        |msg| msg,
+                    );
+                
+                
             }
             Message::InviteToGroupResult { success, message } => {
                 self.logger.push(LogMessage {
@@ -956,7 +922,7 @@ impl ChatAppState {
             }
             Message::UsersListFiltered { list } => {
                 self.users_search_results = list.clone();
-                Command::none()
+                return Command::none();
             }
             Message::ListOnlineUsers => {
                 return Command::perform(
@@ -1138,7 +1104,7 @@ impl ChatAppState {
             // Placeholder implementations for other messages
             _ => {
                 // Handle other messages as needed
-                Command::none()
+                return Command::none();
             }
         }
 
