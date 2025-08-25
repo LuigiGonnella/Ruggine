@@ -196,7 +196,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         // Groups list
         let mut groups_column = Column::new().spacing(12);
         
-        for (group_id, group_name, member_count) in &state.my_groups {
+        for (group_id, group_name, _member_count) in &state.my_groups {
             let group_item = Container::new(
                 Row::new()
                     .spacing(16)

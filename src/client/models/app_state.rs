@@ -1136,7 +1136,27 @@ impl ChatAppState {
                             let mut guard = svc.lock().await;
                             let cmd = format!("/my_groups {}", token);
                             match guard.send_command(&host, cmd).await {
-                                Ok(response) => parse_groups_response(&response),
+                                Ok(response) => {
+                                    // Parse response: "OK: My groups: id1:name1, id2:name2"
+                                    if response.starts_with("OK: My groups:") {
+                                        let after = response.splitn(3, ':').nth(2).unwrap_or("");
+                                        let groups: Vec<(String, String, usize)> = after
+                                            .split(',')
+                                            .map(|s| s.trim())
+                                            .filter(|s| !s.is_empty())
+                                            .map(|s| {
+                                                if let Some((id, name)) = s.split_once(':') {
+                                                    (id.to_string(), name.to_string(), 0) // member_count not used
+                                                } else {
+                                                    (s.to_string(), s.to_string(), 0)
+                                                }
+                                            })
+                                            .collect();
+                                        Message::MyGroupsLoaded { groups }
+                                    } else {
+                                        Message::MyGroupsLoaded { groups: vec![] }
+                                    }
+                                },
                                 Err(_) => vec![],
                             }
                         },
@@ -1150,7 +1170,8 @@ impl ChatAppState {
                 }
             }
             Message::DiscardPrivateMessages { with } => {
-                self.discarded_private_chats.insert(with.clone());
+                let now = chrono::Utc::now().timestamp();
+                self.discarded_private_chats.insert(with.clone(), now);
                 self.private_chats.remove(&with);
                 use crate::client::gui::views::logger::{LogMessage, LogLevel};
                 self.logger.push(LogMessage {
@@ -1159,7 +1180,8 @@ impl ChatAppState {
                 });
             }
             Message::DiscardGroupMessages { group_id } => {
-                self.discarded_group_chats.insert(group_id.clone());
+                let now = chrono::Utc::now().timestamp();
+                self.discarded_group_chats.insert(group_id.clone(), now);
                 self.group_chats.remove(&group_id);
                 use crate::client::gui::views::logger::{LogMessage, LogLevel};
                 self.logger.push(LogMessage {
@@ -1178,7 +1200,6 @@ impl ChatAppState {
                 self.loading_private_chats.remove(&with);
                 self.private_chats.insert(with, filtered_messages);
                 return Command::none();
-            }
             Message::NewGroupMessagesReceived { group_id, messages } => {
                 // Filter out messages that were sent before discard timestamp
                 let filtered_messages = if let Some(&discard_timestamp) = self.discarded_group_chats.get(&group_id) {
@@ -1188,8 +1209,8 @@ impl ChatAppState {
                 };
                 
                 self.loading_group_chats.remove(&group_id);
-                self.group_chats.insert(group_id, filtered_messages);
                 return Command::none();
+            _ => {}
             }
             Message::StopMessagePolling => {
                 self.polling_active = false;
@@ -1207,6 +1228,7 @@ impl ChatAppState {
                 ()
             }
         }
+        Command::none()
         
         Command::none()
     }
