@@ -86,8 +86,6 @@ pub struct ChatAppState {
     pub loading_invites: bool,
     pub friends_list: Vec<String>,
     pub friend_requests: Vec<(String, String)>, // (username, message)
-    pub discarded_private_chats: std::collections::HashMap<String, i64>, // username -> timestamp
-    pub discarded_group_chats: std::collections::HashMap<String, i64>, // group_id -> timestamp
 }
 
 impl ChatAppState {
@@ -1252,25 +1250,11 @@ impl ChatAppState {
                 }
                 Command::none()
             Message::NewMessagesReceived { with, messages } => {
-                // Filter out messages that were sent before discard timestamp
-                let filtered_messages = if let Some(&discard_timestamp) = self.discarded_private_chats.get(&with) {
-                    messages.into_iter().filter(|msg| msg.timestamp > discard_timestamp).collect()
-                } else {
-                    messages
-                };
-                
                 self.loading_private_chats.remove(&with);
-                self.private_chats.insert(with, filtered_messages);
+                self.private_chats.insert(with, messages);
                 return Command::none();
             }
             Message::NewGroupMessagesReceived { group_id, messages } => {
-                // Filter out messages that were sent before discard timestamp
-                let filtered_messages = if let Some(&discard_timestamp) = self.discarded_group_chats.get(&group_id) {
-                    messages.into_iter().filter(|msg| msg.timestamp > discard_timestamp).collect()
-                } else {
-                    messages
-                };
-                
                 self.loading_group_chats.remove(&group_id);
                 return Command::none();
             }
