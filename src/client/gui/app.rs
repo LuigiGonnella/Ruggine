@@ -40,7 +40,13 @@ impl Application for ChatApp {
                     Ok(response) => {
                         let cleaned = response.split("SESSION:").next().map(|s| s.trim().to_string()).unwrap_or_default();
                         if response.starts_with("OK:") {
-                            return Message::AuthResult { success: true, message: cleaned, token: Some(token) };
+                            // Extract username from response for auto-login display
+                            let username = cleaned.trim_start_matches("OK:").trim();
+                            return Message::AuthResult { 
+                                success: true, 
+                                message: format!("OK: {}", username), 
+                                token: Some(token) 
+                            };
                         } else {
                             return Message::SessionMissing;
                         }

@@ -78,7 +78,7 @@ fn action_card<'a>(icon: &'a str, title: &'a str, detail: &'a str, btn_label: &'
         .push(Text::new(icon).font(EMOJI_FONT).size(24).style(TEXT_PRIMARY))
         .push(Text::new(title).font(BOLD_FONT).size(20).style(TEXT_PRIMARY));
 
-    let description = Text::new(detail).size(14).style(TEXT_SECONDARY);
+    let description = Text::new(detail).size(14).style(Color::from_rgb(0.85, 0.85, 0.85)); // Lighter text for better visibility
 
     let primary_btn = Button::new(
         Text::new(btn_label)

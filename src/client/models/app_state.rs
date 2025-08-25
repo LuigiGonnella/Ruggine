@@ -93,14 +93,30 @@ impl ChatAppState {
                         } else {
                             println!("[SESSION_STORE] Token saved successfully");
                         }
+                        
+                        // Extract username from success message for auto-login cases
+                        if message.starts_with("OK:") {
+                            let username_part = message.trim_start_matches("OK:").trim();
+                            if !username_part.is_empty() && self.username.is_empty() {
+                                self.username = username_part.to_string();
+                            }
+                        }
                     }
                     self.app_state = AppState::MainActions;
+                    // Clear any previous error messages and logger for clean transition
+                    self.error_message = None;
+                    self.logger.clear();
                     self.logger.push(LogMessage {
                         level: LogLevel::Success,
-                        message: message.clone(),
+                        message: if self.is_login || message.contains("validate") { 
+                            "Login successful".to_string() 
+                        } else { 
+                            "Registration successful".to_string() 
+                        },
                     });
                 } else {
                     self.error_message = Some(message.clone());
+                    self.logger.clear(); // Clear previous messages
                     self.logger.push(LogMessage {
                         level: LogLevel::Error,
                         message: message.clone(),
@@ -109,6 +125,7 @@ impl ChatAppState {
             }
             Message::SessionMissing => {
                 self.app_state = AppState::Registration;
+                self.logger.clear(); // Clear any previous messages
             }
             Message::Logout => {
                 // Clear session token from secure storage
@@ -133,10 +150,8 @@ impl ChatAppState {
                 self.username.clear();
                 self.password.clear();
                 self.app_state = AppState::Registration;
-                self.logger.push(LogMessage {
-                    level: LogLevel::Info,
-                    message: "Logged out successfully".to_string(),
-                });
+                // Clear logger completely on logout for clean slate
+                self.logger.clear();
             }
             Message::ClearLog => {
                 self.logger.clear();

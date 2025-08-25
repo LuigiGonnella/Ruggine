@@ -147,9 +147,14 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
     let submit_enabled = username_valid && password_valid && host_valid && !loading;
 
     // Top logger bar
-    let logger_bar = Container::new(logger_view(&state.logger))
-        .width(Length::Fill)
-        .padding([8, 12, 0, 12]);
+    let logger_bar = if !state.logger.is_empty() {
+        Container::new(logger_view(&state.logger))
+            .width(Length::Fill)
+            .padding([8, 12, 0, 12])
+    } else {
+        Container::new(Space::new(Length::Fill, Length::Fixed(0.0)))
+            .width(Length::Fill)
+    };
 
     // Host selector in top right with modern styling
     let host_selector = Container::new(
