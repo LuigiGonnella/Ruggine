@@ -267,6 +267,15 @@ impl Server {
                     "ERR: Invalid or expired session".to_string()
                 }
             }
+            "/group_members" if args.len() == 2 => {
+                let session_token = args[0];
+                let group_id = args[1];
+                if let Some(_uid) = auth::validate_session(self.db.clone(), session_token).await {
+                    groups::get_group_members(self.db.clone(), group_id).await
+                } else {
+                    "ERR: Invalid or expired session".to_string()
+                }
+            }
             "/join_group" if args.len() == 2 => {
                 let session_token = args[0];
                 if let Some(uid) = auth::validate_session(self.db.clone(), session_token).await {

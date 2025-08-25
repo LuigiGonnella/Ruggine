@@ -90,4 +90,13 @@ pub enum Message {
     AcceptGroupInvite { invite_id: i64 },
     RejectGroupInvite { invite_id: i64 },
     GroupInviteActionResult { success: bool, message: String },
+    // Friend system
+    OpenSendFriendRequest,
+    OpenViewFriends,
+    SendFriendRequestToUser { username: String, message: String },
+    AcceptFriendRequestFromUser { username: String },
+    RejectFriendRequestFromUser { username: String },
+    FriendsLoaded { friends: Vec<String> },
+    FriendRequestsLoaded { requests: Vec<(String, String)> },
+    FriendRequestResult { success: bool, message: String },
 }

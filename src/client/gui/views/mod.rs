@@ -9,3 +9,5 @@ pub mod create_group;
 pub mod my_groups;
 pub mod invite_to_group;
 pub mod my_group_invites;
+pub mod send_friend_request;
+pub mod view_friends;

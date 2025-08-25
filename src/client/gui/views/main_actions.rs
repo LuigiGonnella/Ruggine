@@ -194,11 +194,11 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
 
     let invites_card = action_card(
         "✉️",
-        "Invites to groups",
+        "Invites to groups", 
         "See pending group invites and accept or reject",
         "View Invites",
         Message::OpenMyGroupInvites,
-        None
+        Some(("Friend Requests", Message::OpenFriendRequests))
     );
 
     let friends_card = action_card(
@@ -206,8 +206,8 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         "Friends",
         "Your friends list and quick actions",
         "View Friends",
-        Message::OpenFriendRequests,
-        Some(("Friend Requests", Message::OpenFriendRequests))
+        Message::OpenViewFriends,
+        Some(("Send Friend Request", Message::OpenSendFriendRequest))
     );
 
     // Cards container with proper spacing

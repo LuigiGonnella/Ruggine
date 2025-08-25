@@ -22,6 +22,8 @@ pub enum AppState {
     MyGroups,
     InviteToGroup { group_id: String, group_name: String },
     MyGroupInvites,
+    SendFriendRequest,
+    ViewFriends,
 }
 
 impl Default for AppState {
@@ -67,6 +69,8 @@ pub struct ChatAppState {
     pub loading_groups: bool,
     pub my_group_invites: Vec<(i64, String, String)>, // (invite_id, group_name, invited_by)
     pub loading_invites: bool,
+    pub friends_list: Vec<String>,
+    pub friend_requests: Vec<(String, String)>, // (username, message)
 }
 
 impl ChatAppState {
@@ -334,17 +338,303 @@ impl ChatAppState {
                 let svc = chat_service.clone();
                 let cfg = crate::server::config::ClientConfig::from_env();
                 let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                let token = self.session_token.clone().unwrap_or_default();
+                let group_id_for_filter = group_id.clone();
+                
+                return Command::perform(
+                    async move {
+                        // Get all users and group members to filter
+                        let all_users = UsersService::list_all(&svc, &host).await.unwrap_or_default();
+                        
+                        // Get group members to filter them out
+                        let mut guard = svc.lock().await;
+                        let group_members_resp = guard.send_command(&host, format!("/group_members {} {}", token, group_id_for_filter)).await.unwrap_or_default();
+                        drop(guard);
+                        
+                        // Parse group members (assuming format "OK: Members: user1, user2")
+                        let existing_members: Vec<String> = if group_members_resp.starts_with("OK: Members:") {
+                            group_members_resp.trim_start_matches("OK: Members:").trim()
+                                .split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                        } else {
+                            vec![]
+                        };
+                        
+                        // Filter out existing members
+                        let filtered_users: Vec<String> = all_users.into_iter()
+                            .filter(|user| !existing_members.contains(user))
+                            .collect();
+                        
+                        Message::UsersListLoaded { kind: "Invite".to_string(), list: filtered_users }
+                    },
+                    |msg| msg,
+                );
+            }
+            Message::OpenSendFriendRequest => {
+                self.app_state = AppState::SendFriendRequest;
+                self.users_search_query.clear();
+                self.users_search_results.clear();
+                
+                // Auto-load all users for friend request
+                let svc = chat_service.clone();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                 
                 return Command::perform(
                     async move {
                         match UsersService::list_all(&svc, &host).await {
-                            Ok(users) => Message::UsersListLoaded { kind: "Invite".to_string(), list: users },
-                            Err(_) => Message::UsersListLoaded { kind: "Invite".to_string(), list: vec![] },
+                            Ok(users) => Message::UsersListLoaded { kind: "FriendRequest".to_string(), list: users },
+                            Err(_) => Message::UsersListLoaded { kind: "FriendRequest".to_string(), list: vec![] },
                         }
                     },
                     |msg| msg,
                 );
             }
+            Message::OpenViewFriends => {
+                self.app_state = AppState::ViewFriends;
+                self.loading = true;
+                
+                // Load user's friends
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/list_friends {}", token_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK: Friends:") {
+                                        let friends_part = response.trim_start_matches("OK: Friends:").trim();
+                                        let friends: Vec<String> = if friends_part.is_empty() {
+                                            vec![]
+                                        } else {
+                                            friends_part.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+                                        };
+                                        Message::FriendsLoaded { friends }
+                                    } else {
+                                        Message::FriendsLoaded { friends: vec![] }
+                                    }
+                                }
+                                Err(_) => Message::FriendsLoaded { friends: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::OpenFriendRequests => {
+                self.app_state = AppState::FriendRequests;
+                self.loading = true;
+                
+                // Load user's friend requests
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/received_friend_requests {}", token_clone)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK: Richieste ricevute:") {
+                                        let requests_part = response.trim_start_matches("OK: Richieste ricevute:").trim();
+                                        let requests: Vec<(String, String)> = if requests_part.is_empty() {
+                                            vec![]
+                                        } else {
+                                            requests_part.split(" | ").filter_map(|s| {
+                                                if let Some((username, message)) = s.trim().split_once(':') {
+                                                    Some((username.trim().to_string(), message.trim().to_string()))
+                                                } else {
+                                                    None
+                                                }
+                                            }).collect()
+                                        };
+                                        Message::FriendRequestsLoaded { requests }
+                                    } else {
+                                        Message::FriendRequestsLoaded { requests: vec![] }
+                                    }
+                                }
+                                Err(_) => Message::FriendRequestsLoaded { requests: vec![] },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::SendFriendRequestToUser { username, message } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/send_friend_request {} {} {}", token_clone, username, message)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::FriendRequestResult { 
+                                            success: true, 
+                                            message: format!("Friend request sent to {} successfully!", username) 
+                                        }
+                                    } else {
+                                        Message::FriendRequestResult { 
+                                            success: false, 
+                                            message: response 
+                                        }
+                                    }
+                                }
+                                Err(e) => Message::FriendRequestResult { 
+                                    success: false, 
+                                    message: format!("Error sending friend request: {}", e) 
+                                },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::AcceptFriendRequestFromUser { username } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/accept_friend_request {} {}", token_clone, username)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::FriendRequestResult { 
+                                            success: true, 
+                                            message: format!("Friend request from {} accepted!", username) 
+                                        }
+                                    } else {
+                                        Message::FriendRequestResult { 
+                                            success: false, 
+                                            message: response 
+                                        }
+                                    }
+                                }
+                                Err(e) => Message::FriendRequestResult { 
+                                    success: false, 
+                                    message: format!("Error accepting friend request: {}", e) 
+                                },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::RejectFriendRequestFromUser { username } => {
+                if let Some(token) = &self.session_token {
+                    let svc = chat_service.clone();
+                    let token_clone = token.clone();
+                    let cfg = crate::server::config::ClientConfig::from_env();
+                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                    
+                    return Command::perform(
+                        async move {
+                            let mut guard = svc.lock().await;
+                            match guard.send_command(&host, format!("/reject_friend_request {} {}", token_clone, username)).await {
+                                Ok(response) => {
+                                    if response.starts_with("OK:") {
+                                        Message::FriendRequestResult { 
+                                            success: true, 
+                                            message: format!("Friend request from {} rejected.", username) 
+                                        }
+                                    } else {
+                                        Message::FriendRequestResult { 
+                                            success: false, 
+                                            message: response 
+                                        }
+                                    }
+                                }
+                                Err(e) => Message::FriendRequestResult { 
+                                    success: false, 
+                                    message: format!("Error rejecting friend request: {}", e) 
+                                },
+                            }
+                        },
+                        |msg| msg,
+                    );
+                }
+            }
+            Message::FriendsLoaded { friends } => {
+                self.loading = false;
+                self.friends_list = friends;
+            }
+            Message::FriendRequestsLoaded { requests } => {
+                self.loading = false;
+                self.friend_requests = requests;
+            }
+            Message::FriendRequestResult { success, message } => {
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message: message.clone(),
+                });
+                
+                // Auto-clear logger after 2 seconds
+                return Command::perform(
+                    async move {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        Message::ClearLog
+                    },
+                    |msg| msg,
+                );
+            }
+            Message::InviteToGroupResult { success, message } => {
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message: message.clone(),
+                });
+                
+                // Auto-clear logger after 2 seconds
+                return Command::perform(
+                    async move {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        Message::ClearLog
+                    },
+                    |msg| msg,
+                );
+            }
+            Message::GroupInviteActionResult { success, message } => {
+                self.logger.push(LogMessage {
+                    level: if success { LogLevel::Success } else { LogLevel::Error },
+                    message: message.clone(),
+                });
+                
+                // Auto-clear logger after 2 seconds and refresh if successful
+                if success {
+                    return Command::batch([
+                        Command::perform(
+                            async move {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                                Message::ClearLog
+                            },
+                            |msg| msg,
+                        ),
+                        Command::perform(
+                            async move { Message::OpenMyGroupInvites },
+                            |msg| msg,
+                        )
+                    ]);
+                } else {
+                    return Command::perform(
+                        async move {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            Message::ClearLog
+                        },
+                        |msg| msg,
+                    );
+                }
             Message::CreateGroupInputChanged(name) => {
                 self.create_group_name = name;
             }
