@@ -111,12 +111,13 @@ impl ChatAppState {
                 self.is_login = !self.is_login;
                 self.error_message = None;
             }
-            Message::ToggleShowPassword => {
-                self.show_password = !self.show_password;
-            }
-            Message::AuthResult { success, message, token } => {
-                self.loading = false;
-                if success {
+                                    // Extract group_id from response: "OK: Group 'name' created with ID: uuid"
+                                    let group_id = if let Some(id_part) = response.split("ID: ").nth(1) {
+                                        id_part.trim().to_string()
+                                    } else {
+                                        // Fallback: generate a temporary ID (shouldn't happen)
+                                        format!("temp_{}", chrono::Utc::now().timestamp())
+                                    };
                     if let Some(t) = token {
                         self.session_token = Some(t.clone());
                         // Save token securely
@@ -722,6 +723,11 @@ impl ChatAppState {
                 return Command::perform(
                     async move { Message::OpenGroupChat(group_id, group_name) },
                     |msg| msg,
+                self.app_state = AppState::GroupChat(group_id.clone(), group_name.clone());
+                self.loading_group_chats.insert(group_id.clone());
+                return Command::perform(
+                    async move { () },
+                    move |_| Message::StartGroupMessagePolling { group_id: group_id.clone() }
                 );
             }
             Message::MyGroupsLoaded { groups } => {
