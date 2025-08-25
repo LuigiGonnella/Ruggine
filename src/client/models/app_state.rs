@@ -1124,23 +1124,6 @@ impl ChatAppState {
                         level: LogLevel::Success,
                         message: message.clone(),
                     });
-                    // Reload my groups after successful leave
-                    if let Some(token) = &self.session_token {
-                        let cfg = crate::server::config::ClientConfig::from_env();
-                        let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                        let svc = chat_service.clone();
-                        let token_clone = token.clone();
-                        return Command::perform(
-                            async move {
-                                let mut guard = svc.lock().await;
-                                match guard.send_command(&host, format!("/my_groups {}", token_clone)).await {
-                                    Ok(response) => parse_groups_response(&response),
-                                    Err(_) => Message::MyGroupsLoaded { groups: vec![] },
-                                }
-                            },
-                            |msg| msg,
-                        );
-                    }
                     // Reload groups list
                     let svc = chat_service.clone();
                     let token = self.session_token.clone().unwrap_or_default();
@@ -1208,7 +1191,8 @@ impl ChatAppState {
                         |msg| msg,
                     );
                 }
-                Command::none()
+                return Command::none();
+            }
             Message::DiscardGroupMessages { group_id } => {
                 if let Some(token) = &self.session_token {
                     let cfg = crate::server::config::ClientConfig::from_env();
@@ -1233,7 +1217,7 @@ impl ChatAppState {
                         |msg| msg,
                     );
                 }
-                Command::none()
+                return Command::none();
             }
             Message::DiscardMessagesResult { success, message } => {
                 use crate::client::gui::views::logger::{LogMessage, LogLevel};
@@ -1248,7 +1232,8 @@ impl ChatAppState {
                         message: message.clone(),
                     });
                 }
-                Command::none()
+                return Command::none();
+            }
             Message::NewMessagesReceived { with, messages } => {
                 self.loading_private_chats.remove(&with);
                 self.private_chats.insert(with, messages);

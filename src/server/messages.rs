@@ -462,33 +462,7 @@ pub async fn delete_group_messages(db: Arc<Database>, session_token: &str, group
         }
     }
 }
-    let is_member = sqlx::query("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?")
-        .bind(group_id)
-        .bind(&user_id)
-        .fetch_optional(&db.pool)
-        .await
-        .ok()
-        .flatten()
-        .is_some();
-    if !is_member {
-        return "ERR: Not a group member".to_string();
-    }
-    let chat_id = format!("group:{}", group_id);
-    let res = sqlx::query("DELETE FROM encrypted_messages WHERE chat_id = ?")
-        .bind(&chat_id)
-        .execute(&db.pool)
-        .await;
-    match res {
-        Ok(_) => {
-            println!("[MSG] Deleted all messages in group {} by {}", group_id, user_id);
-            "OK: Messages deleted".to_string()
-        }
-        Err(e) => {
-            println!("[MSG] Error deleting group messages: {}", e);
-            format!("ERR: {}", e)
-        }
-    }
-}
+    
 
 pub async fn delete_private_messages(db: Arc<Database>, session_token: &str, other_username: &str) -> String {
     let user_id = match auth::validate_session(db.clone(), session_token).await {

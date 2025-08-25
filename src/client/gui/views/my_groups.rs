@@ -229,7 +229,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
                             .push(
                                 Button::new(
                                     Container::new(
-                                        Text::new("🚪").font(EMOJI_FONT).size(16)
+                                        Text::new("🔚").font(EMOJI_FONT).size(16)
                                     )
                                     .width(Length::Fill)
                                     .center_x()
