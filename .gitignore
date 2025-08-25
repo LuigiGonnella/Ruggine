@@ -1,6 +1,3 @@
-#docs
-doc/
-
 # Rust/Cargo generated files
 **/target/
 **/*.rs.bk
@@ -28,17 +25,15 @@ Thumbs.db
 *.log
 
 # Database files (commentato - vogliamo tracciare il database statico)
-data/
- *.db
- *.sqlite
- *.sqlite3
+# data/
+# *.db
+# *.sqlite
+# *.sqlite3
 
 # Environment files (commentato - vogliamo tracciare .env per collaborazione)
- .env
- .env.local
- .env.production
- .env.example
-**/.env.*
+# .env
+# .env.local
+# .env.production
 
 # Temporary files
 *.tmp
