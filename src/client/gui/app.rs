@@ -144,7 +144,7 @@ impl Application for ChatApp {
                         |msg| msg,
                     );
                 }
-                ()
+                Command::none()
             }
             Msg::StopGroupMessagePolling => {
                 self.state.group_polling_active = false;

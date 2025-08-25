@@ -268,14 +268,16 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .width(Length::Fill)
         .height(Length::Fill);
 
-    // Stack logger on top
-    iced::widget::Stack::new()
-        .push(
-            Container::new(main_content)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .style(iced::theme::Container::Custom(Box::new(bg_main_appearance)))
-        )
+    // Main layout with logger overlay using Column
+    let final_content = Column::new()
         .push(logger_bar)
+        .push(main_content)
+        .width(Length::Fill)
+        .height(Length::Fill);
+
+    Container::new(final_content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(iced::theme::Container::Custom(Box::new(bg_main_appearance)))
         .into()
 }

@@ -210,6 +210,24 @@ pub async fn invite_user_to_group(db: Arc<Database>, from_user_id: &str, to_user
     }
 }
 
+pub async fn get_group_members(db: Arc<Database>, group_id: &str) -> String {
+    println!("[GROUPS] Get members for group {}", group_id);
+    let rows = sqlx::query("SELECT u.username FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id = ?")
+        .bind(group_id)
+        .fetch_all(&db.pool)
+        .await;
+    match rows {
+        Ok(rows) => {
+            let members: Vec<String> = rows.iter().map(|r| r.get::<String,_>("username")).collect();
+            format!("OK: Group members: {}", members.join(", "))
+        }
+        Err(e) => {
+            println!("[GROUPS] Error getting group members: {}", e);
+            format!("ERR: {}", e)
+        }
+    }
+}
+
 pub async fn my_invites(db: Arc<Database>, user_id: &str) -> String {
     println!("[GROUPS] List invites for user {}", user_id);
     let rows = sqlx::query("SELECT gi.id, g.name as group_name, u.username as invited_by FROM group_invites gi JOIN groups g ON gi.group_id = g.id JOIN users u ON gi.invited_by = u.id WHERE gi.invited_user_id = ? AND gi.status = 'pending'")

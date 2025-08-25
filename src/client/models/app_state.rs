@@ -330,7 +330,7 @@ impl ChatAppState {
                 }
             }
             Message::OpenInviteToGroup { group_id, group_name } => {
-                self.app_state = AppState::InviteToGroup { group_id, group_name };
+                self.app_state = AppState::InviteToGroup { group_id: group_id.clone(), group_name };
                 self.users_search_query.clear();
                 self.users_search_results.clear();
                 
