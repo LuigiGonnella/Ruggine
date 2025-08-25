@@ -125,12 +125,17 @@ impl ChatAppState {
                     self.logger.clear();
                     self.logger.push(LogMessage {
                         level: LogLevel::Success,
-                        message: if self.is_login || message.contains("validate") { 
-                            "Login successful".to_string() 
-                        } else { 
-                            "Registration successful".to_string() 
-                        },
+                        message: "Login successful".to_string(),
                     });
+
+                    // Auto-clear logger after 2 seconds (same behavior as other views)
+                    return Command::perform(
+                        async move {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            Message::ClearLog
+                        },
+                        |msg| msg,
+                    );
                 } else {
                     self.error_message = Some(message.clone());
                     self.logger.clear(); // Clear previous messages
@@ -138,6 +143,15 @@ impl ChatAppState {
                         level: LogLevel::Error,
                         message: message.clone(),
                     });
+
+                    // Auto-clear error logger after 2 seconds to match other flows
+                    return Command::perform(
+                        async move {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            Message::ClearLog
+                        },
+                        |msg| msg,
+                    );
                 }
             }
             Message::SessionMissing => {

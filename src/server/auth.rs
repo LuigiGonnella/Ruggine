@@ -120,8 +120,13 @@ pub async fn register(db: Arc<Database>, username: &str, password: &str, config:
                 .execute(&mut *tx)
                 .await;
             if let Err(e) = res {
-                println!("[AUTH] Registration failed for {}: {}", username, e);
-                return format!("ERR: Registration failed: {}", e);
+                // Detect common UNIQUE constraint failure (username already exists) and return a friendlier message
+                let err_str = e.to_string();
+                println!("[AUTH] Registration failed for {}: {}", username, err_str);
+                if err_str.to_lowercase().contains("UNIQUE") || err_str.to_lowercase().contains("constraint failed") {
+                    return "ERR: Username already used".to_string();
+                }
+                return format!("ERR: Registration failed");
             }
             sqlx::query("INSERT INTO user_encryption_keys (user_id, public_key, private_key) VALUES (?, '', '')")
                 .bind(&user_id)
