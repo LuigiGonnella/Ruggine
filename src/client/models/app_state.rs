@@ -86,7 +86,47 @@ pub struct ChatAppState {
     pub loading_invites: bool,
     pub friends_list: Vec<String>,
     pub friend_requests: Vec<(String, String)>, // (username, message)
-    pub discarded_private_chats: std::collections::HashSet<String>,
+    
+    // Discard tracking - stores timestamp of when messages were discarded
+    pub discarded_private_chats: std::collections::HashMap<String, i64>, // username -> timestamp
+    pub discarded_group_chats: std::collections::HashMap<String, i64>, // group_id -> timestamp
+}
+
+impl Default for ChatAppState {
+    fn default() -> Self {
+        Self {
+            app_state: AppState::default(),
+            username: String::new(),
+            password: String::new(),
+            selected_host: HostType::default(),
+            manual_host: String::new(),
+            is_login: true,
+            loading: false,
+            error_message: None,
+            session_token: None,
+            show_password: false,
+            logger: Vec::new(),
+            users_search_query: String::new(),
+            users_search_results: Vec::new(),
+            current_message_input: String::new(),
+            private_chats: HashMap::new(),
+            loading_private_chats: std::collections::HashSet::new(),
+            polling_active: false,
+            group_chats: HashMap::new(),
+            loading_group_chats: std::collections::HashSet::new(),
+            group_polling_active: false,
+            create_group_name: String::new(),
+            selected_participants: std::collections::HashSet::new(),
+            my_groups: Vec::new(),
+            loading_groups: false,
+            my_group_invites: Vec::new(),
+            loading_invites: false,
+            friends_list: Vec::new(),
+            friend_requests: Vec::new(),
+            discarded_private_chats: std::collections::HashMap::new(),
+            discarded_group_chats: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl ChatAppState {
