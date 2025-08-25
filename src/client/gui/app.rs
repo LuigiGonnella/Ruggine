@@ -119,7 +119,7 @@ impl Application for ChatApp {
             }
             Msg::StartMessagePolling { with } => {
                 if !self.state.polling_active {
-                    println!("[APP] StartMessagePolling requested for {}", with);
+                    // Start message polling (log removed)
                     self.state.polling_active = true;
                     let svc = self.chat_service.clone();
                     let token = self.state.session_token.clone().unwrap_or_default();
@@ -128,17 +128,10 @@ impl Application for ChatApp {
                     let with_clone = with.clone();
                     return Command::perform(
                         async move {
-                            println!("[APP] Fetching private messages for {}", with_clone);
                             let mut guard = svc.lock().await;
                             match guard.get_private_messages(&host, &token, &with_clone).await {
-                                Ok(messages) => {
-                                    println!("[APP] Fetched {} private messages for {}", messages.len(), with_clone);
-                                    Msg::NewMessagesReceived { with: with_clone.clone(), messages }
-                                }
-                                Err(e) => {
-                                    println!("[APP] Private fetch failed for {}: {}", with_clone, e);
-                                    Msg::NewMessagesReceived { with: with_clone.clone(), messages: vec![] }
-                                }
+                                Ok(messages) => Msg::NewMessagesReceived { with: with_clone.clone(), messages },
+                                Err(_) => Msg::NewMessagesReceived { with: with_clone.clone(), messages: vec![] },
                             }
                         },
                         |msg| msg,
@@ -149,7 +142,7 @@ impl Application for ChatApp {
             }
             Msg::StartGroupMessagePolling { group_id } => {
                 if !self.state.group_polling_active {
-                    println!("[APP] StartGroupMessagePolling requested for {}", group_id);
+                    // Start group message polling (log removed)
                     self.state.group_polling_active = true;
                     let svc = self.chat_service.clone();
                     let token = self.state.session_token.clone().unwrap_or_default();
@@ -158,17 +151,10 @@ impl Application for ChatApp {
                     let group_id_clone = group_id.clone();
                     return Command::perform(
                         async move {
-                            println!("[APP] Fetching group messages for {}", group_id_clone);
                             let mut guard = svc.lock().await;
                             match guard.get_group_messages(&host, &token, &group_id_clone).await {
-                                Ok(messages) => {
-                                    println!("[APP] Fetched {} group messages for {}", messages.len(), group_id_clone);
-                                    Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages }
-                                }
-                                Err(e) => {
-                                    println!("[APP] Group fetch failed for {}: {}", group_id_clone, e);
-                                    Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages: vec![] }
-                                }
+                                Ok(messages) => Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages },
+                                Err(_) => Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages: vec![] },
                             }
                         },
                         |msg| msg,
@@ -183,7 +169,6 @@ impl Application for ChatApp {
             }
             Msg::NewGroupMessagesReceived { group_id, messages } => {
                 if self.state.group_polling_active {
-                    println!("[APP] NewGroupMessagesReceived for {}: {} messages", group_id, messages.len());
                     self.state.group_chats.insert(group_id.clone(), messages.to_vec());
                     // clear loading flag when messages arrive
                     self.state.loading_group_chats.remove(&group_id);
@@ -236,7 +221,6 @@ impl Application for ChatApp {
             }
             Msg::NewMessagesReceived { with, messages } => {
                 if self.state.polling_active {
-                    println!("[APP] NewMessagesReceived for {}: {} messages", with, messages.len());
                     self.state.private_chats.insert(with.clone(), messages.to_vec());
                     // clear loading flag when messages arrive
                     self.state.loading_private_chats.remove(&with);

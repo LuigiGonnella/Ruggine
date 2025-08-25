@@ -105,11 +105,9 @@ impl ChatAppState {
                     if let Some(t) = token {
                         self.session_token = Some(t.clone());
                         // Save token securely
-                        if let Err(e) = session_store::save_session_token(&t) {
-                            println!("[SESSION_STORE] Failed to save token: {}", e);
-                        } else {
-                            println!("[SESSION_STORE] Token saved successfully");
-                        }
+                                if let Err(_e) = session_store::save_session_token(&t) {
+                                    // Failed to save session token to secure store; ignore (non-fatal)
+                                }
                         
                         // Extract username from success message for auto-login cases
                         if message.starts_with("OK:") {
@@ -999,7 +997,6 @@ impl ChatAppState {
                 }
             }
             Message::GroupMessagesLoaded { group_id, messages } => {
-                println!("[APP_STATE] NewGroupMessagesReceived for {}: {} messages", group_id, messages.len());
                 self.group_chats.insert(group_id.clone(), messages);
                 self.loading_group_chats.remove(&group_id);
                 
