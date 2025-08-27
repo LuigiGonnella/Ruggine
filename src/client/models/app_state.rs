@@ -111,6 +111,9 @@ impl ChatAppState {
                 self.is_login = !self.is_login;
                 self.error_message = None;
             }
+            Message::ToggleShowPassword => {
+                self.show_password = !self.show_password;
+            }
             Message::AuthResult { success, message, token } => {
                 self.loading = false;
                 if success {
