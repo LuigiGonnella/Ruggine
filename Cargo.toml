@@ -30,6 +30,14 @@ keyring = "1.1"
 rustls = "0.21"
 tokio-rustls = "0.24"
 rustls-pemfile = "1.0"
+# WebSocket dependencies
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+url = "2.5"
+# Redis dependencies  
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+# Additional utilities
+dashmap = "5.5"
 
 [features]
 default = ["client", "server"]

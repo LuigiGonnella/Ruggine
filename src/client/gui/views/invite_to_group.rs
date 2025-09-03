@@ -8,7 +8,6 @@ use crate::client::gui::views::logger::logger_view;
 const BG_MAIN: Color = Color::from_rgb(0.06, 0.07, 0.18);
 const CARD_BG: Color = Color::from_rgb(0.18, 0.19, 0.36);
 const INPUT_BG: Color = Color::from_rgb(0.12, 0.13, 0.26);
-const ACCENT_COLOR: Color = Color::from_rgb(0.0, 0.7, 0.3);
 const TEXT_PRIMARY: Color = Color::WHITE;
 const TEXT_SECONDARY: Color = Color::from_rgb(0.7, 0.7, 0.7);
 

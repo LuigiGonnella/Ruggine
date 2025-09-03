@@ -1,84 +1,17 @@
 // src/server/main.rs
 // Entry point per il server ruggine_modulare
-use ruggine_modulare::server::{connection::Server, config::ServerConfig, database::Database};
-use clap::Parser;
-use log::{info, error};
+use ruggine_modulare::server::{config::ServerConfig, database::Database, connection::Server};
+use ruggine_modulare::server::websocket::ChatWebSocketManager;
 use std::sync::Arc;
-
-#[derive(Parser, Debug)]
-#[command(name = "ruggine-server")]
-#[command(about = "A chat server application")]
-struct Args {
-    #[arg(long, default_value = "0.0.0.0")]
-    host: String,
-    #[arg(short, long, default_value = "5000")]
-    port: u16,
-}
+use tokio::net::TcpListener;
+use log::{info, error};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // load .env for development configuration
-    let _ = dotenvy::dotenv();
+    // Configura logging
     env_logger::init();
-    let args = Args::parse();
+
     let config = ServerConfig::from_env();
-
-    // Log DB URL for diagnostics
-    info!("Using database URL: {}", config.database_url);
-
-    // Ensure parent directory for sqlite file exists when using file-backed sqlite URL
-    if let Some(mut db_path) = config.database_url.strip_prefix("sqlite:") {
-        // normalize leading slashes (handles sqlite://path and sqlite:////absolute)
-        while db_path.starts_with('/') {
-            db_path = &db_path[1..];
-        }
-
-        // skip memory DBs like :memory:
-        if !db_path.contains("memory") {
-            use std::path::Path;
-            let path = Path::new(db_path);
-            if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent).map_err(|e| {
-                        anyhow::anyhow!("Failed to create DB parent dir '{}': {}", parent.display(), e)
-                    })?;
-                }
-            }
-
-            // Try to create or open the file to surface permission errors early
-            use std::fs::OpenOptions;
-            match OpenOptions::new().create(true).append(true).open(path) {
-                Ok(_) => info!("Ensured DB file exists or is creatable: {}", path.display()),
-                Err(e) => {
-                    error!("Failed to create/open DB file {}: {}", path.display(), e);
-                    return Err(anyhow::anyhow!(e))
-                }
-            }
-        }
-    }
-    info!("Starting ruggine_modulare server on {}:{}", args.host, args.port);
-    let db = Arc::new(Database::connect(&config.database_url).await?);
-    db.migrate().await?;
-    let presence = ruggine_modulare::server::presence::PresenceRegistry::new();
-    let server = Server { db: db.clone(), config: config.clone(), presence };
-
-    // Spawn periodic cleanup of expired sessions (runs every hour)
-    let cleaner_db = db.clone();
-    tokio::spawn(async move {
-        loop {
-            ruggine_modulare::server::auth::cleanup_expired_sessions(cleaner_db.clone()).await;
-            tokio::time::sleep(std::time::Duration::from_secs(60 * 60)).await;
-        }
-    });
-
-    // Start performance logger: writes CPU and DB stats periodically to a file
-    // Path configurable via PERFORMANCE_LOG_PATH env var
-    let perf_log_path = std::env::var("PERFORMANCE_LOG_PATH").unwrap_or_else(|_| "data/ruggine_performance.log".to_string());
-    let perf_db = db.clone();
-    tokio::spawn(async move {
-        // call the utility that runs an intervaled logger
-        ruggine_modulare::utils::performance::start_performance_logger(perf_db.clone(), &perf_log_path).await;
-    });
 
     // TLS hint for the operator
     if config.enable_encryption {
@@ -87,6 +20,68 @@ async fn main() -> anyhow::Result<()> {
         log::info!("TLS is disabled; connections will be plain TCP.");
     }
 
-    server.run(&format!("{}:{}", args.host, args.port)).await?;
+    // Initialize database and server
+    let database = Arc::new(Database::connect(&config.database_url).await?);
+    let presence = ruggine_modulare::server::presence::PresenceRegistry::new();
+    let server = Server { 
+        db: database.clone(), 
+        config: config.clone(), 
+        presence 
+    };
+
+    // Initialize WebSocket manager with Redis
+    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let ws_manager = Arc::new(ChatWebSocketManager::new(&redis_url).await?);
+    
+    // Start Redis subscriber for cross-instance messaging
+    ws_manager.start_redis_subscriber().await?;
+    
+    // Start WebSocket server on a different port
+    let ws_port = config.port + 1; // WebSocket su porta +1 rispetto al server principale
+    let ws_host = config.host.clone();
+    let ws_manager_clone = ws_manager.clone();
+    tokio::spawn(async move {
+        if let Err(e) = start_websocket_server(&format!("{}:{}", ws_host, ws_port), ws_manager_clone).await {
+            error!("WebSocket server error: {}", e);
+        }
+    });
+
+    info!("WebSocket server started on {}:{}", config.host, ws_port);
+
+    server.run(&format!("{}:{}", config.host, config.port)).await?;
     Ok(())
 }
+
+async fn start_websocket_server(
+    addr: &str, 
+    ws_manager: Arc<ChatWebSocketManager>
+) -> anyhow::Result<()> {
+    let listener = TcpListener::bind(addr).await?;
+    info!("WebSocket server listening on {}", addr);
+
+    while let Ok((stream, addr)) = listener.accept().await {
+        info!("New WebSocket connection from {}", addr);
+        let ws_manager = ws_manager.clone();
+        
+        tokio::spawn(async move {
+            match tokio_tungstenite::accept_async(stream).await {
+                Ok(ws_stream) => {
+                    // In una implementazione completa, dovresti autenticare l'utente qui
+                    // Per ora usiamo un user_id fittizio basato sull'indirizzo
+                    let user_id = format!("user_{}", addr.port());
+                    
+                    if let Err(e) = ws_manager.add_connection(ws_stream, user_id).await {
+                        error!("Error handling WebSocket connection: {}", e);
+                    }
+                }
+                Err(e) => {
+                    error!("Error during WebSocket handshake: {}", e);
+                }
+            }
+        });
+    }
+    
+    Ok(())
+}
+
+

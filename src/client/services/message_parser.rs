@@ -1,5 +1,37 @@
 // Modulo di parsing messaggi lato client
 use crate::client::models::app_state::ChatMessage;
+use crate::common::crypto::CryptoManager;
+use base64::{Engine as _, engine::general_purpose};
+
+/// Attempt to decrypt a message content if it appears to be encrypted JSON
+fn try_decrypt_content(content: &str, participants: &[String]) -> String {
+    // Check if content looks like encrypted JSON
+    if content.contains("ciphertext") && content.contains("nonce") {
+        if let Ok(encrypted_data) = serde_json::from_str::<serde_json::Value>(content) {
+            if let Some(master_key) = CryptoManager::load_master_key_from_env() {
+                let chat_key = CryptoManager::generate_chat_key(participants, &master_key);
+                
+                if let (Some(ciphertext), Some(nonce)) = (
+                    encrypted_data.get("ciphertext").and_then(|v| v.as_str()),
+                    encrypted_data.get("nonce").and_then(|v| v.as_str())
+                ) {
+                    // Decode base64 encoded ciphertext and nonce
+                    if let (Ok(cipher_bytes), Ok(nonce_bytes)) = (
+                        general_purpose::STANDARD.decode(ciphertext),
+                        general_purpose::STANDARD.decode(nonce)
+                    ) {
+                        if let Ok(decrypted) = CryptoManager::decrypt_message(&cipher_bytes, &nonce_bytes, &chat_key) {
+                            return decrypted;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // If decryption fails or content is not encrypted, return as-is
+    content.to_string()
+}
 
 /// Parse server `OK: Messages:\n<lines...>` responses into Vec<String>.
 pub fn parse_messages(resp: &str) -> Result<Vec<String>, &'static str> {
@@ -18,8 +50,8 @@ pub fn parse_messages(resp: &str) -> Result<Vec<String>, &'static str> {
 	}
 }
 
-/// Parse private messages from server response into ChatMessage structs
-pub fn parse_private_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static str> {
+/// Parse private messages from server response into ChatMessage structs with decryption
+pub fn parse_private_messages_with_participants(resp: &str, participants: &[String]) -> Result<Vec<ChatMessage>, &'static str> {
     let trimmed = resp.trim();
     if !trimmed.starts_with("OK: Messages:") {
         return Err("unexpected response format");
@@ -45,14 +77,17 @@ pub fn parse_private_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static s
                     
                     if let Some(colon_pos) = rest.find(':') {
                         let sender = rest[..colon_pos].trim().to_string();
-                        let content = rest[colon_pos + 1..].trim().to_string();
+                        let raw_content = rest[colon_pos + 1..].trim().to_string();
                         
                         if let Ok(timestamp) = timestamp_str.parse::<i64>() {
                             let formatted_time = format_timestamp(timestamp);
                             
+                            // Try to decrypt the content if it's encrypted
+                            let decrypted_content = try_decrypt_content(&raw_content, participants);
+                            
                             messages.push(ChatMessage {
                                 sender,
-                                content,
+                                content: decrypted_content,
                                 timestamp,
                                 formatted_time,
                                 sent_at: timestamp,
@@ -71,6 +106,12 @@ pub fn parse_private_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static s
     }
 }
 
+/// Parse private messages from server response into ChatMessage structs (legacy version)
+pub fn parse_private_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static str> {
+    // Use empty participants list for backward compatibility
+    parse_private_messages_with_participants(resp, &[])
+}
+
 fn format_timestamp(timestamp: i64) -> String {
     use chrono::{DateTime, Utc, Local, TimeZone};
     
@@ -81,8 +122,8 @@ fn format_timestamp(timestamp: i64) -> String {
     local_dt.format("%H:%M").to_string()
 }
 
-/// Parse group messages from server response into ChatMessage structs
-pub fn parse_group_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static str> {
+/// Parse group messages from server response into ChatMessage structs with decryption
+pub fn parse_group_messages_with_participants(resp: &str, participants: &[String]) -> Result<Vec<ChatMessage>, &'static str> {
     let trimmed = resp.trim();
     if !trimmed.starts_with("OK: Messages:") {
         return Err("unexpected response format");
@@ -108,14 +149,17 @@ pub fn parse_group_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static str
                     
                     if let Some(colon_pos) = rest.find(':') {
                         let sender_name = rest[..colon_pos].trim().to_string();
-                        let content = rest[colon_pos + 1..].trim().to_string();
+                        let raw_content = rest[colon_pos + 1..].trim().to_string();
                         
                         if let Ok(timestamp) = timestamp_str.parse::<i64>() {
                             let formatted_time = format_timestamp(timestamp);
                             
+                            // Try to decrypt the content if it's encrypted
+                            let decrypted_content = try_decrypt_content(&raw_content, participants);
+                            
                             messages.push(ChatMessage {
                                 sender: sender_name, // Now shows actual username
-                                content,
+                                content: decrypted_content,
                                 timestamp,
                                 formatted_time,
                                 sent_at: timestamp,
@@ -132,4 +176,10 @@ pub fn parse_group_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static str
     } else {
         Ok(vec![])
     }
+}
+
+/// Parse group messages from server response into ChatMessage structs (legacy version)
+pub fn parse_group_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static str> {
+    // Use empty participants list for backward compatibility
+    parse_group_messages_with_participants(resp, &[])
 }

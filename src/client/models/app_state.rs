@@ -104,6 +104,9 @@ impl ChatAppState {
             Message::PasswordChanged(password) => {
                 self.password = password;
             }
+            Message::ToggleShowPassword => {
+                self.show_password = !self.show_password;
+            }
             Message::HostSelected(host_type) => {
                 self.selected_host = host_type;
             }
@@ -696,7 +699,7 @@ impl ChatAppState {
                                 match guard.send_command(&host, format!("/create_group {} {} {}", token_clone, name_clone, participants_str)).await {
                                     Ok(response) => {
                                         // Extract group_id from response: "OK: Group 'name' created with ID: uuid"
-                                        let group_id = if let Some(id_part) = response.split("ID: ").nth(1) {
+                                        if let Some(id_part) = response.split("ID: ").nth(1) {
                                             let group_id = id_part.trim().to_string();
                                             return Message::GroupCreated { group_id, group_name: name_clone }
                                         } else {
@@ -1093,12 +1096,11 @@ impl ChatAppState {
                     }
                 }
             }
-             Message::LeaveGroup { group_id, group_name } => {
+             Message::LeaveGroup { group_id: _, group_name } => {
                 let cfg = crate::server::config::ClientConfig::from_env();
                 let host = format!("{}:{}", cfg.default_host, cfg.default_port);
                 let token = self.session_token.clone().unwrap_or_default();
                 let svc = chat_service.clone();
-                let group_id_clone = group_id.clone();
                 let group_name_clone = group_name.clone();
                 
                 return Command::perform(
@@ -1241,7 +1243,7 @@ impl ChatAppState {
                 self.private_chats.insert(with, messages);
                 return Command::none();
             }
-            Message::NewGroupMessagesReceived { group_id, messages } => {
+            Message::NewGroupMessagesReceived { group_id, messages: _ } => {
                 self.loading_group_chats.remove(&group_id);
                 return Command::none();
             }

@@ -7,3 +7,5 @@ pub mod users;
 pub mod groups;
 pub mod messages;
 pub mod presence;
+pub mod websocket;
+pub mod redis_cache;

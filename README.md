@@ -21,11 +21,20 @@ Questa guida fornisce istruzioni chiare e operative su come configurare, costrui
 - Contribuire
 
 ## Panoramica
-Ruggine gestisce chat private e di gruppo. Le conversazioni sono salvate nel database in forma cifrata (AES-256-GCM) e il server mantiene un modello di sessioni e presenza per i client connessi. Il progetto è pensato per essere facilmente integrato in pipeline CI/CD e in infrastrutture containerizzate.
+Ruggine gestisce chat private e di gruppo con messaggistica in tempo reale. Le conversazioni sono salvate nel database in forma cifrata (AES-256-GCM) e il server mantiene un modello di sessioni e presenza per i client connessi. 
+
+### Nuove Funzionalità v2.0
+- **WebSocket + Redis**: Messaggistica in tempo reale che sostituisce il polling del database
+- **Scalabilità migliorata**: Supporto per multiple istanze server via Redis pub/sub
+- **Latenza ridotta**: Messaggi istantanei invece di attesa polling
+- **Efficienza di rete**: Solo messaggi necessari invece di query periodiche
+
+Il progetto è pensato per essere facilmente integrato in pipeline CI/CD e in infrastrutture containerizzate.
 
 ## Requisiti di produzione
 - Toolchain: utilizzare Rust stable (compilare in CI). Bloccare le dipendenze con `Cargo.lock`.
 - Database: PostgreSQL 14+ (consigliato); SQLite è solo per sviluppo.
+- Redis: Redis 6+ per WebSocket pub/sub e caching (obbligatorio per messaging real-time).
 - TLS: certificati validi per ingress/endpoint. È raccomandato l'uso di rustls o di un reverse-proxy (nginx/traefik).
 - Secret management: Vault, AWS Secrets Manager, Azure Key Vault o equivalenti per `ENCRYPTION_MASTER_KEY` e credenziali DB.
 
@@ -34,8 +43,10 @@ I parametri principali sono gestiti tramite variabili d'ambiente (o secret mount
 
 ```powershell
 DATABASE_URL=postgres://ruggine_user:securepassword@postgres:5432/ruggine
+REDIS_URL=redis://redis:6379
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8443
+WEBSOCKET_PORT=8444
 ENABLE_ENCRYPTION=true
 ENCRYPTION_MASTER_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 TLS_CERT_PATH=/etc/ssl/certs/ruggine.crt

@@ -291,33 +291,48 @@ fn decrypt_group_message_with_fallback(
     sender_id: &str,
     config: &ServerConfig
 ) -> String {
+    println!("[DECRYPT] Attempting to decrypt group message");
+    println!("[DECRYPT] Current members: {:?}", current_members);
+    println!("[DECRYPT] All historical members: {:?}", all_historical_members);
+    println!("[DECRYPT] Sender ID: {}", sender_id);
+    
     // Strategy 1: Try with current members
+    println!("[DECRYPT] Strategy 1: Trying with current members");
     if let Ok(decrypted) = decrypt_message_from_storage(encrypted_data, current_members, config) {
+        println!("[DECRYPT] SUCCESS with current members");
         return decrypted;
     }
     
     // Strategy 2: Try with all possible historical member combinations
     // Start with smaller combinations and work up
+    println!("[DECRYPT] Strategy 2: Trying historical member combinations");
     for size in 2..=all_historical_members.len() {
         let combinations = generate_member_combinations(all_historical_members, size);
+        println!("[DECRYPT] Trying {} combinations of size {}", combinations.len(), size);
         for combo in combinations {
+            println!("[DECRYPT] Trying combination: {:?}", combo);
             if let Ok(decrypted) = decrypt_message_from_storage(encrypted_data, &combo, config) {
+                println!("[DECRYPT] SUCCESS with combination: {:?}", combo);
                 return decrypted;
             }
         }
     }
     
     // Strategy 3: Try with just sender (for very old messages)
+    println!("[DECRYPT] Strategy 3: Trying with sender only");
     if let Ok(decrypted) = decrypt_message_from_storage(encrypted_data, &[sender_id.to_string()], config) {
+        println!("[DECRYPT] SUCCESS with sender only");
         return decrypted;
     }
     
     // Strategy 4: If it's not encrypted JSON, return as plain text (legacy)
     if !encrypted_data.starts_with('{') {
+        println!("[DECRYPT] Strategy 4: Returning as plain text (legacy)");
         return encrypted_data.to_string();
     }
     
     // Last resort: show decryption failed
+    println!("[DECRYPT] ALL STRATEGIES FAILED");
     "[DECRYPTION FAILED]".to_string()
 }
 
@@ -422,7 +437,7 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
                 // For private chats the participants are the two user ids we already computed in `ids`
                 let clear = match decrypt_message_from_storage(&msg, &ids, config) {
                     Ok(s) => s,
-                    Err(_) => msg.clone(),
+                    Err(_) => "[DECRYPTION FAILED]".to_string(),
                 };
                 format!("[{}] {}: {}", ts, sender_name, clear).into()
             }).collect();

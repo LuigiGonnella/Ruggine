@@ -99,6 +99,7 @@ impl CryptoManager {
         let digest = digest::digest(&digest::SHA256, &input);
         let mut chat_key = [0u8; 32];
         chat_key.copy_from_slice(digest.as_ref());
+        
         chat_key
     }
 
