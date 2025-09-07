@@ -40,8 +40,9 @@ async fn main() -> anyhow::Result<()> {
     let ws_port = config.port + 1; // WebSocket su porta +1 rispetto al server principale
     let ws_host = config.host.clone();
     let ws_manager_clone = ws_manager.clone();
+    let database_clone = database.clone();
     tokio::spawn(async move {
-        if let Err(e) = start_websocket_server(&format!("{}:{}", ws_host, ws_port), ws_manager_clone).await {
+        if let Err(e) = start_websocket_server(&format!("{}:{}", ws_host, ws_port), ws_manager_clone, database_clone).await {
             error!("WebSocket server error: {}", e);
         }
     });
@@ -54,7 +55,8 @@ async fn main() -> anyhow::Result<()> {
 
 async fn start_websocket_server(
     addr: &str, 
-    ws_manager: Arc<ChatWebSocketManager>
+    ws_manager: Arc<ChatWebSocketManager>,
+    database: Arc<Database>
 ) -> anyhow::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     info!("WebSocket server listening on {}", addr);
@@ -62,15 +64,13 @@ async fn start_websocket_server(
     while let Ok((stream, addr)) = listener.accept().await {
         info!("New WebSocket connection from {}", addr);
         let ws_manager = ws_manager.clone();
+        let database = database.clone();
         
         tokio::spawn(async move {
             match tokio_tungstenite::accept_async(stream).await {
                 Ok(ws_stream) => {
-                    // In una implementazione completa, dovresti autenticare l'utente qui
-                    // Per ora usiamo un user_id fittizio basato sull'indirizzo
-                    let user_id = format!("user_{}", addr.port());
-                    
-                    if let Err(e) = ws_manager.add_connection(ws_stream, user_id).await {
+                    // Usa l'autenticazione corretta invece di user_id fittizio
+                    if let Err(e) = ws_manager.handle_authenticated_connection(ws_stream, database).await {
                         error!("Error handling WebSocket connection: {}", e);
                     }
                 }
