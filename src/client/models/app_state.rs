@@ -142,14 +142,13 @@ impl ChatAppState {
                     let ws_svc = chat_service.clone();
                     let ws_token = self.session_token.clone().unwrap_or_default();
                     let ws_config = crate::server::config::ClientConfig::from_env();
-                    let ws_host_port = format!("{}:{}", ws_config.websocket_host, ws_config.websocket_port);
                     
                     return Command::batch([
                         // Connect to WebSocket for real-time messaging
                         Command::perform(
                             async move {
                                 let mut guard = ws_svc.lock().await;
-                                match guard.connect_websocket(&ws_host_port, ws_token).await {
+                                match guard.connect_websocket(&ws_config.websocket_host, ws_config.websocket_port, &ws_token).await {
                                     Ok(_) => Message::WebSocketConnected,
                                     Err(e) => Message::WebSocketError { error: format!("WebSocket connection failed: {}", e) }
                                 }

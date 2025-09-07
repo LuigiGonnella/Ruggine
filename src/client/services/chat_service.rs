@@ -4,7 +4,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 use std::sync::Arc;
 use crate::client::services::message_parser;
-use crate::client::services::websocket_service::WebSocketService;
+use crate::client::services::websocket_client::WebSocketClient;
 
 #[derive(Debug)]
 pub enum CommandType {
@@ -19,8 +19,8 @@ pub struct ChatService {
     pub tx: Option<mpsc::UnboundedSender<(CommandType, oneshot::Sender<String>)>>,
     /// Keep the background task handle so it stays alive for the lifetime of the service
     pub _bg: Option<tokio::task::JoinHandle<()>>,
-    /// WebSocket service for real-time messaging
-    pub websocket: Arc<WebSocketService>,
+    /// WebSocket client for real-time messaging
+    pub websocket: Option<WebSocketClient>,
     /// Current user information
     pub current_user: Option<String>,
 }
@@ -29,9 +29,9 @@ impl ChatService {
     pub fn new() -> Self {
         Self { 
             tx: None, 
-            _bg: None,
-            websocket: Arc::new(WebSocketService::new()),
-            current_user: None,
+            _bg: None, 
+            websocket: None,
+            current_user: None 
         }
     }
     
@@ -39,26 +39,37 @@ impl ChatService {
     pub async fn reset(&mut self) {
         self.tx = None;
         self._bg = None;
-        self.websocket.disconnect().await;
+        self.websocket = None;
         self.current_user = None;
     }
 
     /// Initialize WebSocket connection
-    pub async fn connect_websocket(&mut self, ws_host: &str, user_id: String) -> anyhow::Result<()> {
-        let ws_url = format!("ws://{}", ws_host);
-        self.websocket.connect(&ws_url, user_id.clone()).await?;
-        self.current_user = Some(user_id);
+    pub async fn connect_websocket(&mut self, ws_host: &str, ws_port: u16, session_token: &str) -> anyhow::Result<()> {
+        let ws_url = format!("ws://{}:{}", ws_host, ws_port);
+        
+        // Create new WebSocket client
+        let mut ws_client = WebSocketClient::new(ws_url.clone());
+        ws_client.set_session_token(session_token.to_string());
+        
+        // Connect and authenticate
+        ws_client.connect_with_auth().await.map_err(|e| anyhow::anyhow!("WebSocket connection failed: {}", e))?;
+        
+        // Store the connected client
+        self.websocket = Some(ws_client);
+        
+        println!("[CHAT_SERVICE] WebSocket connected to {}", ws_url);
         Ok(())
     }
 
     /// Receive a message from WebSocket
     pub async fn receive_websocket_message(&self) -> Option<crate::server::websocket::WebSocketMessage> {
-        self.websocket.receive_message().await
+        // For now, return None as WebSocketClient doesn't implement message receiving yet
+        None
     }
 
     /// Check if WebSocket is connected
     pub async fn is_websocket_connected(&self) -> bool {
-        self.websocket.is_connected().await
+        self.websocket.is_some()
     }
 
     /// Ensure there is an active background task connected to `host`.
@@ -316,17 +327,8 @@ impl ChatService {
     /// Send a private message using the existing send_command implementation.
     /// Returns the raw server response.
     pub async fn send_private_message(&mut self, host: &str, session_token: &str, to: &str, msg: &str) -> anyhow::Result<String> {
-        // Try WebSocket first if available and connected
-        if self.websocket.is_connected().await {
-            match self.websocket.send_private_message(to, msg).await {
-                Ok(_) => return Ok("OK: Message sent via WebSocket".to_string()),
-                Err(e) => {
-                    eprintln!("[CHAT:SVC] WebSocket send failed, falling back to TCP: {}", e);
-                }
-            }
-        }
-        
-        // Fallback to TCP
+        // For now, always use TCP as WebSocketClient doesn't implement message sending yet
+        // TODO: Implement WebSocket message sending
         let cmd = format!("/send_private_message {} {} {}", session_token, to, msg);
         let resp = self.send_command(host, cmd).await?;
         Ok(resp)
@@ -352,17 +354,8 @@ impl ChatService {
     /// Send a group message using the existing send_command implementation.
     /// Returns the raw server response.
     pub async fn send_group_message(&mut self, host: &str, session_token: &str, group_id: &str, msg: &str) -> anyhow::Result<String> {
-        // Try WebSocket first if available and connected
-        if self.websocket.is_connected().await {
-            match self.websocket.send_group_message(group_id, msg).await {
-                Ok(_) => return Ok("OK: Message sent via WebSocket".to_string()),
-                Err(e) => {
-                    eprintln!("[CHAT:SVC] WebSocket send failed, falling back to TCP: {}", e);
-                }
-            }
-        }
-        
-        // Fallback to TCP
+        // For now, always use TCP as WebSocketClient doesn't implement message sending yet
+        // TODO: Implement WebSocket message sending
         let cmd = format!("/send_group_message {} {} {}", session_token, group_id, msg);
         let resp = self.send_command(host, cmd).await?;
         Ok(resp)
@@ -371,37 +364,9 @@ impl ChatService {
     /// Check for new messages via WebSocket (non-blocking)
     /// Returns messages if available, empty vector otherwise
     pub async fn poll_websocket_messages(&mut self) -> Vec<crate::client::models::app_state::ChatMessage> {
-        match self.websocket.receive_messages().await {
-            Ok(ws_messages) => {
-                // Convert WebSocket messages to ChatMessage format
-                ws_messages.into_iter().filter_map(|ws_msg| {
-                    match ws_msg.message_type {
-                        crate::client::services::websocket_service::MessageType::PrivateMessage |
-                        crate::client::services::websocket_service::MessageType::GroupMessage => {
-                            // Format time for display
-                            let formatted_time = if let Some(datetime) = chrono::DateTime::from_timestamp(ws_msg.timestamp, 0) {
-                                datetime.format("%H:%M:%S").to_string()
-                            } else {
-                                ws_msg.timestamp.to_string()
-                            };
-                            
-                            Some(crate::client::models::app_state::ChatMessage {
-                                sender: ws_msg.sender,
-                                content: ws_msg.content,
-                                timestamp: ws_msg.timestamp,
-                                formatted_time,
-                                sent_at: ws_msg.timestamp,
-                            })
-                        }
-                        _ => None, // Ignore non-chat messages for now
-                    }
-                }).collect()
-            }
-            Err(e) => {
-                eprintln!("[CHAT:SVC] Error polling WebSocket messages: {}", e);
-                Vec::new()
-            }
-        }
+        // For now, return empty vector as WebSocketClient doesn't implement message receiving yet
+        // TODO: Implement WebSocket message receiving
+        Vec::new()
     }
 
     /// Get the current user (needed for WebSocket message processing)
