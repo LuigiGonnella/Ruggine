@@ -128,7 +128,7 @@ Write-Host "• WebSocket Port: 8081" -ForegroundColor Gray
 Write-Host "`n🔧 Comandi Utili:" -ForegroundColor Cyan
 Write-Host "• Testa Redis: redis-cli ping" -ForegroundColor Gray
 Write-Host "• Monitor Redis: redis-cli monitor" -ForegroundColor Gray
-Write-Host "• Test WebSocket: websocat ws://127.0.0.1:8081" -ForegroundColor Gray
+Write-Host "• Setup Redis (se manca): .\setup_redis.ps1" -ForegroundColor Gray
 
 # Se solo Redis è stato avviato, mostra i prossimi passi
 if ($StartRedis -and -not $StartServer) {

@@ -11,7 +11,7 @@ impl UsersService {
     /// List online users. Returns Vec<String> of usernames on success.
     pub async fn list_online(svc: &Arc<Mutex<ChatService>>, host: &str) -> anyhow::Result<Vec<String>> {
         let mut guard = svc.lock().await;
-        let cmd = format!("/online_users");
+        let cmd = "/online_users".to_string();
         let resp = guard.send_command(host, cmd).await?;
         if !resp.starts_with("OK:") {
             return Err(anyhow::anyhow!(resp));
@@ -21,7 +21,7 @@ impl UsersService {
         let after = if resp.matches(':').count() >= 2 {
             resp.splitn(3, ':').nth(2).unwrap_or("")
         } else {
-            resp.splitn(2, ':').nth(1).unwrap_or("")
+            resp.split_once(':').map(|x| x.1).unwrap_or("")
         };
         let list = after.trim().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         Ok(list)
@@ -30,7 +30,7 @@ impl UsersService {
     /// List all users. Returns Vec<String> of usernames on success.
     pub async fn list_all(svc: &Arc<Mutex<ChatService>>, host: &str) -> anyhow::Result<Vec<String>> {
         let mut guard = svc.lock().await;
-        let cmd = format!("/all_users");
+        let cmd = "/all_users".to_string();
         let resp = guard.send_command(host, cmd).await?;
         if !resp.starts_with("OK:") {
             return Err(anyhow::anyhow!(resp));
@@ -38,7 +38,7 @@ impl UsersService {
         let after = if resp.matches(':').count() >= 2 {
             resp.splitn(3, ':').nth(2).unwrap_or("")
         } else {
-            resp.splitn(2, ':').nth(1).unwrap_or("")
+            resp.split_once(':').map(|x| x.1).unwrap_or("")
         };
         let list = after.trim().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         Ok(list)

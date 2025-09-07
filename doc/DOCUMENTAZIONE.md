@@ -4,6 +4,8 @@
 > è stata unificata in `doc/SESSION_AND_TLS.md`. Per i dettagli sul flusso di login, logout,
 > auto-login, kicked_out/quit events e la configurazione TLS consultare quel file.
 >
+> Per informazioni complete sul supporto multi-piattaforma vedere `doc/CROSS_PLATFORM_SUPPORT.md`.
+>
 > Questo file contiene ancora una panoramica generale del progetto; per dettagli operativi
 > e debugging legati alle sessioni usare il documento specifico.
 
@@ -15,38 +17,71 @@
 ```
 src/
   lib.rs                // Libreria principale
-  main.rs               // Entry point applicazione
+  main.rs               // Entry point GUI client
+  bin/                  // File binari
+    chat_test.rs        // Test client CLI
+    db_inspect.rs       // Tool di ispezione database
   client/               // Logica lato client
-    cli_client.rs       // Client CLI
-    gui/                // Client GUI (modulare)
-      app.rs            // Logica principale GUI
+    mod.rs              // Modulo client
+    gui/                // Client GUI con Iced
+      app.rs            // Applicazione principale
+      mod.rs
       views/            // Viste GUI
-      widgets/          // Componenti GUI
+        group_chat.rs
+        logger.rs
+        main_actions.rs
+        private_chat.rs
+        registration.rs
+      widgets/          // Widget GUI
+        alert.rs
+        input_section.rs
     models/             // Modelli dati client
-      app_state.rs      // Stato applicazione client
-      messages.rs       // Modelli messaggi
-    services/           // Servizi client (es. chat)
-      chat_service.rs   // Gestione chat lato client
+      app_state.rs      // Stato applicazione
+      messages.rs       // Messaggi UI
+      mod.rs
+      ui_state.rs
+    services/           // Servizi client
+      chat_service.rs   // Gestione chat TCP
+      connection.rs     // Connessioni di base
+      message_parser.rs // Parse messaggi server
+      mod.rs
+      users_service.rs  // Servizi utenti
+      websocket_client.rs // Client WebSocket
+      websocket_service.rs // Servizio WebSocket
     utils/              // Utility client
+      constants.rs      // Costanti
+      mod.rs
+      session_store.rs  // Gestione sessioni
   common/               // Moduli condivisi
+    crypto.rs           // Crittografia condivisa
+    mod.rs
+    models.rs           // Modelli condivisi
   server/               // Logica lato server
     auth.rs             // Autenticazione
-    chat_manager.rs     // Gestione chat
+    chat_manager.rs     // Manager chat
     config.rs           // Configurazione server
-    connection.rs       // Gestione connessioni
-    database.rs         // Persistenza dati
+    connection.rs       // Gestione connessioni TCP
+    database.rs         // Persistenza SQLite
     groups.rs           // Gestione gruppi
+    main.rs             // Server entry point
     messages.rs         // Gestione messaggi
+    mod.rs
+    presence.rs         // Presenza utenti
+    redis_cache.rs      // Cache Redis
     users.rs            // Gestione utenti
-    utils/              // Utility server
+    websocket.rs        // Server WebSocket
+  utils/                // Utility generali
+    mod.rs
+    performance.rs      // Metriche performance
 ```
 
 ## 3. Flow e Funzionamento
 
 ### 3.1 Avvio Applicazione
-- `main.rs` determina la modalità di avvio (client/server/CLI/GUI) tramite parametri o configurazione.
-- In modalità server, vengono inizializzati i moduli di autenticazione, database, gestione utenti, gruppi e messaggi.
-- In modalità client, viene avviata l'interfaccia CLI o GUI, e si stabilisce la connessione al server.
+- **GUI Client** (`main.rs`): Avvia l'applicazione Iced GUI
+- **Server** (`src/server/main.rs`): Avvia server TCP + WebSocket con Redis
+- **Test CLI** (`src/bin/chat_test.rs`): Client di test via TCP
+- Il server inizializza database SQLite, Redis, autenticazione e WebSocket manager
 
 ### 3.2 Logica Client-Server
 - **Client**: invia richieste (login, invio messaggi, creazione gruppi, ecc.) tramite socket TCP/UDP o altro protocollo.

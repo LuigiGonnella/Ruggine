@@ -42,13 +42,13 @@ impl Application for ChatApp {
                         if response.starts_with("OK:") {
                             // Extract username from response for auto-login display
                             let username = cleaned.trim_start_matches("OK:").trim();
-                            return Message::AuthResult { 
+                            Message::AuthResult { 
                                 success: true, 
                                 message: format!("OK: {}", username), 
                                 token: Some(token) 
-                            };
+                            }
                         } else {
-                            return Message::SessionMissing;
+                            Message::SessionMissing
                         }
                     }
                     Err(_) => Message::SessionMissing,

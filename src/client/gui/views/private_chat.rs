@@ -141,7 +141,7 @@ fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Elemen
     .into()
 }
 
-fn create_message_bubble<'a>(msg: &'a crate::client::models::app_state::ChatMessage, is_my_message: bool) -> Element<'a, Message> {
+fn create_message_bubble(msg: &crate::client::models::app_state::ChatMessage, is_my_message: bool) -> Element<'_, Message> {
     let bubble_color = if is_my_message { MY_MESSAGE_BG } else { OTHER_MESSAGE_BG };
 
     let message_content = Column::new()

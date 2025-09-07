@@ -214,7 +214,7 @@ impl ChatWebSocketManager {
             let _ = ws_sender.send(Message::Text(serde_json::to_string(&error_response)?)).await;
             println!("[WS:AUTH] Authentication failed for token: {}", &auth_message.session_token[..8]);
             
-            return Err(anyhow::anyhow!("Authentication failed"));
+            Err(anyhow::anyhow!("Authentication failed"))
         }
     }
 

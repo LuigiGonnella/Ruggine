@@ -2,7 +2,7 @@
 use iced::{Element, widget::{column, text, text_input, button}};
 use crate::client::models::messages::Message;
 
-pub fn view<'a>(input: &'a str) -> Element<'a, Message> {
+pub fn view(input: &str) -> Element<'_, Message> {
     column![
         text("Scrivi un messaggio:"),
     text_input("Messaggio", input),

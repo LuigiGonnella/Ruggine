@@ -4,20 +4,22 @@ use crate::client::models::messages::Message;
 use crate::client::models::app_state::ChatAppState;
 use crate::client::gui::views::logger::logger_view;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HostType {
+    #[default]
     Localhost,
     Remote,
     Manual,
 }
 
-impl ToString for HostType {
-    fn to_string(&self) -> String {
-        match self {
-            HostType::Localhost => "Localhost".to_string(),
-            HostType::Remote => "Remote".to_string(),
-            HostType::Manual => "Manual".to_string(),
-        }
+impl std::fmt::Display for HostType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            HostType::Localhost => "Localhost",
+            HostType::Remote => "Remote", 
+            HostType::Manual => "Manual",
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -26,20 +28,6 @@ const ALL_HOSTS: [HostType; 3] = [HostType::Localhost, HostType::Remote, HostTyp
 impl HostType {
     pub fn all() -> &'static [HostType] {
         &ALL_HOSTS
-    }
-
-    pub fn to_str(&self) -> &'static str {
-        match self {
-            HostType::Localhost => "Localhost",
-            HostType::Remote => "Remote",
-            HostType::Manual => "Manual",
-        }
-    }
-}
-
-impl Default for HostType {
-    fn default() -> Self {
-        HostType::Localhost
     }
 }
 
@@ -131,7 +119,7 @@ fn host_selector_appearance(_: &iced::Theme) -> iced::widget::container::Appeara
 pub fn view(state: &ChatAppState) -> Element<Message> {
     let username = &state.username;
     let password = &state.password;
-    let selected_host = state.selected_host.clone();
+    let selected_host = state.selected_host;
     let manual_host = &state.manual_host;
     let is_login = state.is_login;
     let loading = state.loading;
@@ -164,8 +152,8 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
             .push(Text::new("🌐").font(EMOJI_FONT).size(16).style(TEXT_SECONDARY))
             .push(
                 PickList::new(
-                    &HostType::all()[..],
-                    Some(selected_host.clone()),
+                    HostType::all(),
+                    Some(selected_host),
                     Message::HostSelected,
                 )
                 .placeholder("Select host")
@@ -424,7 +412,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
                             .size(16)
                     )
                     .push(
-                        Text::new(if loading { "Connecting..." } else { if is_login { "Sign In" } else { "Create Account" } })
+                        Text::new(if loading { "Connecting..." } else if is_login { "Sign In" } else { "Create Account" })
                             .size(16)
                             .style(TEXT_SECONDARY)
                     )

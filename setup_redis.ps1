@@ -111,7 +111,10 @@ catch {
 }
 
 Write-Host "`n🚀 Prossimi passi:" -ForegroundColor Green
-Write-Host "1. Avvia Redis: redis-server redis.conf" -ForegroundColor White
-Write-Host "2. In un altro terminale: cargo run --bin ruggine_server" -ForegroundColor White
-Write-Host "3. In un terzo terminale: cargo run --bin ruggine_gui" -ForegroundColor White
-Write-Host "`nOppure usa: .\startup.ps1 -StartClient" -ForegroundColor Yellow
+Write-Host "1. Setup completato! Usa lo script di avvio:" -ForegroundColor White
+Write-Host "   .\startup.ps1                    # Avvia solo Redis" -ForegroundColor Yellow
+Write-Host "   .\startup.ps1 -StartClient       # Avvia tutto (Redis + Server + Client)" -ForegroundColor Yellow
+Write-Host "`n2. Oppure avvio manuale:" -ForegroundColor White
+Write-Host "   redis-server redis.conf" -ForegroundColor Gray
+Write-Host "   cargo run --bin ruggine-server" -ForegroundColor Gray
+Write-Host "   cargo run --bin ruggine-gui" -ForegroundColor Gray

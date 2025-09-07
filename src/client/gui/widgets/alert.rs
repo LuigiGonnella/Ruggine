@@ -2,6 +2,6 @@
 use iced::{Element, widget::text};
 use crate::client::models::messages::Message;
 
-pub fn view<'a>(msg: &'a str) -> Element<'a, Message> {
+pub fn view(msg: &str) -> Element<'_, Message> {
     text(format!("ALERT: {}", msg)).into()
 }

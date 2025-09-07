@@ -115,7 +115,7 @@ pub fn parse_private_messages(resp: &str) -> Result<Vec<ChatMessage>, &'static s
 fn format_timestamp(timestamp: i64) -> String {
     use chrono::{DateTime, Utc, Local, TimeZone};
     
-    let dt = Utc.timestamp_opt(timestamp, 0).single().unwrap_or_else(|| Utc::now());
+    let dt = Utc.timestamp_opt(timestamp, 0).single().unwrap_or_else(Utc::now);
     let local_dt: DateTime<Local> = dt.with_timezone(&Local);
     
     // Format as HH:MM

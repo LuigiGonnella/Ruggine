@@ -102,7 +102,7 @@ fn generate_session_token() -> String {
     let uuid = uuid::Uuid::new_v4().to_string();
     let mut random = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut random);
-    format!("{}-{:x}", uuid, md5::compute(&random))
+    format!("{}-{:x}", uuid, md5::compute(random))
 }
 
 pub async fn register(db: Arc<Database>, username: &str, password: &str, config: &ServerConfig) -> String {
@@ -126,7 +126,7 @@ pub async fn register(db: Arc<Database>, username: &str, password: &str, config:
                 if err_str.to_lowercase().contains("UNIQUE") || err_str.to_lowercase().contains("constraint failed") {
                     return "ERR: Username already used".to_string();
                 }
-                return format!("ERR: Registration failed");
+                return "ERR: Registration failed".to_string();
             }
             sqlx::query("INSERT INTO user_encryption_keys (user_id, public_key, private_key) VALUES (?, '', '')")
                 .bind(&user_id)
@@ -234,11 +234,11 @@ pub async fn login(db: Arc<Database>, username: &str, password: &str, config: &S
                         }
 
                         println!("[AUTH] Login success for {} (id={})", username, user_id);
-                        return format!("OK: Logged in as {} SESSION: {}", username, session_token)
+                        format!("OK: Logged in as {} SESSION: {}", username, session_token)
                     }
                     Err(e) => {
                         println!("[AUTH] Failed to start transaction for login {}: {}", username, e);
-                        return format!("ERR: Login failed: {}", e);
+                        format!("ERR: Login failed: {}", e)
                     }
                 }
             } else {

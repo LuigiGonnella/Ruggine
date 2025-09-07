@@ -26,7 +26,11 @@ impl ServerConfig {
         } else {
             println!("[CRYPTO] No valid ENCRYPTION_MASTER_KEY in .env, generating a new one (set ENCRYPTION_MASTER_KEY to persist)");
             let key = CryptoManager::generate_master_key();
-            let key_hex: String = key.iter().map(|b| format!("{:02x}", b)).collect();
+            let key_hex = key.iter().fold(String::new(), |mut acc, b| {
+                use std::fmt::Write;
+                write!(&mut acc, "{:02x}", b).unwrap();
+                acc
+            });
             println!("[CRYPTO] Generated master key: {}", key_hex);
             key
         };

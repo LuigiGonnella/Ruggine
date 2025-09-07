@@ -13,9 +13,9 @@ Questa pagina descrive il comportamento corrente nel repository: come il server 
 - Comportamento d'errore: se la connessione è chiusa dal server, il client tenta di riconnettere e reinviare la stessa richiesta.
 
 ### File chiave (riferimento)
-- Server: `src/server/connection.rs`, `src/server/auth.rs`, `src/server/presence.rs`.
-- Client: `src/client/services/chat_service.rs`.
-- Test / tool: `src/bin/chat_test.rs`, `src/bin/db_inspect.rs`.
+- Server: `src/server/connection.rs`, `src/server/auth.rs`, `src/server/presence.rs`, `src/server/websocket.rs`
+- Client: `src/client/services/chat_service.rs`, `src/client/services/websocket_service.rs`
+- Test: `src/bin/chat_test.rs` (client TCP di test), `src/bin/db_inspect.rs` (tool di debug database)
 
 ## Server: sessioni e presenza
 

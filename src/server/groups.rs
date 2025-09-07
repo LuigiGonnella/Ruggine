@@ -152,7 +152,7 @@ pub async fn invite_user_to_group(db: Arc<Database>, from_user_id: &str, to_user
     
     // Verify that from_user is member of the group
     let is_member = sqlx::query("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?")
-        .bind(&group_id)
+        .bind(group_id)
         .bind(from_user_id)
         .fetch_optional(&db.pool)
         .await
@@ -165,7 +165,7 @@ pub async fn invite_user_to_group(db: Arc<Database>, from_user_id: &str, to_user
     
     // Check if user is already a member
     let already_member = sqlx::query("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?")
-        .bind(&group_id)
+        .bind(group_id)
         .bind(&to_user_id)
         .fetch_optional(&db.pool)
         .await
@@ -178,7 +178,7 @@ pub async fn invite_user_to_group(db: Arc<Database>, from_user_id: &str, to_user
     
     // Check if there's already a pending invite
     let existing_invite = sqlx::query("SELECT 1 FROM group_invites WHERE group_id = ? AND invited_user_id = ? AND status = 'pending'")
-        .bind(&group_id)
+        .bind(group_id)
         .bind(&to_user_id)
         .fetch_optional(&db.pool)
         .await
@@ -192,7 +192,7 @@ pub async fn invite_user_to_group(db: Arc<Database>, from_user_id: &str, to_user
     // Create group invite
     let created_at = chrono::Utc::now().timestamp();
     let res = sqlx::query("INSERT INTO group_invites (group_id, invited_user_id, invited_by, created_at, status) VALUES (?, ?, ?, ?, 'pending')")
-        .bind(&group_id)
+        .bind(group_id)
         .bind(&to_user_id)
         .bind(from_user_id)
         .bind(created_at)

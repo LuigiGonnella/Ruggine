@@ -75,10 +75,8 @@ impl Server {
                         }
                         Err(e) => println!("[SERVER] TLS accept failed: {}", e),
                     }
-                } else {
-                    if let Err(e) = handle_client(db, config, stream, peer, presence.clone()).await {
-                        println!("[SERVER] Client error ({}): {}", peer, e);
-                    }
+                } else if let Err(e) = handle_client(db, config, stream, peer, presence.clone()).await {
+                    println!("[SERVER] Client error ({}): {}", peer, e);
                 }
             });
         }

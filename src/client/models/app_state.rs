@@ -8,8 +8,9 @@ use tokio::sync::Mutex;
 use iced::Command;
 use iced::widget::scrollable;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum AppState {
+    #[default]
     CheckingSession,
     Registration,
     MainActions,
@@ -24,12 +25,6 @@ pub enum AppState {
     MyGroupInvites,
     SendFriendRequest,
     ViewFriends,
-}
-
-impl Default for AppState {
-    fn default() -> Self {
-        AppState::CheckingSession
-    }
 }
 
 // Helper function to extract username from friend request action messages
@@ -701,14 +696,14 @@ impl ChatAppState {
                                         // Extract group_id from response: "OK: Group 'name' created with ID: uuid"
                                         if let Some(id_part) = response.split("ID: ").nth(1) {
                                             let group_id = id_part.trim().to_string();
-                                            return Message::GroupCreated { group_id, group_name: name_clone }
+                                            Message::GroupCreated { group_id, group_name: name_clone }
                                         } else {
                                             // Fallback: generate a temporary ID (shouldn't happen)
-                                            return Message::GroupCreated { group_id: format!("temp_{}", chrono::Utc::now().timestamp()), group_name: name_clone }
-                                        };
+                                            Message::GroupCreated { group_id: format!("temp_{}", chrono::Utc::now().timestamp()), group_name: name_clone }
+                                        }
                                         
                                     }
-                                    Err(e) => return Message::LogError(format!("Errore nella creazione del gruppo: {}", e)),
+                                    Err(e) => Message::LogError(format!("Errore nella creazione del gruppo: {}", e)),
                                 }
                             },
                             |msg| msg,
@@ -1260,7 +1255,6 @@ impl ChatAppState {
             // Placeholder implementations for other messages
             _ => {
                 // Handle other messages as needed
-                ()
             }
         }
         Command::none()

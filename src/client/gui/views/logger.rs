@@ -50,9 +50,9 @@ impl LogMessage {
     }
 }
 
-pub fn logger_view<'a>(messages: &'a [LogMessage]) -> Element<'a, crate::client::models::messages::Message> {
+pub fn logger_view(messages: &[LogMessage]) -> Element<'_, crate::client::models::messages::Message> {
     // Show only the latest message as an alert bar (single message at a time)
-    if let Some(log) = messages.iter().rev().next() {
+    if let Some(log) = messages.iter().next_back() {
         let log_color = log.color();
         let bg_color = log_color;
         Container::new(

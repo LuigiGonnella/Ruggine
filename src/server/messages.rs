@@ -106,7 +106,7 @@ pub async fn send_group_message(db: Arc<Database>, session_token: &str, group_na
         Ok(rows) => rows.iter().map(|r| r.get::<String, _>("user_id")).collect::<Vec<String>>(),
         Err(e) => {
             println!("[MSG] Error getting group members: {}", e);
-            return format!("ERR: Failed to get group members");
+            return "ERR: Failed to get group members".to_string();
         }
     };
     
@@ -492,7 +492,7 @@ pub async fn delete_private_messages(db: Arc<Database>, session_token: &str, oth
         Ok(Some(row)) => row.get::<String,_>("id"),
         _ => return "ERR: User not found".to_string(),
     };
-    let mut ids = vec![user_id.clone(), to_id.clone()];
+    let mut ids = [user_id.clone(), to_id.clone()];
     ids.sort();
     let chat_id = format!("private:{}-{}", ids[0], ids[1]);
     

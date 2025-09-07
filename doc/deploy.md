@@ -27,12 +27,43 @@ Scopo: fornire una procedura passo-passo per mettere in produzione il server Rug
 - Consigliato: usare Let’s Encrypt con reverse-proxy (Traefik/Caddy) o cert-manager su k8s.
 - Se vuoi usare il server rustls direttamente: monta `cert.pem` e `key.pem` in `/app/certs` e imposta `TLS_CERT_PATH` e `TLS_KEY_PATH`.
 
-5) Dockerfile e docker-compose (esempio rapido)
-- Posiziona il `Dockerfile.server` nella root e `docker-compose.yml` per orchestrare `postgres` e `ruggine-server`.
-- Esempi inclusi in repo (ATTENZIONE: i file di esempio non sono inclusi nel repo per questioni di sicurezza; generali di seguito).
+5) Containerizzazione (esempio rapido)
+- Crea un `Dockerfile` per il server Ruggine basato su immagine Rust
+- Usa `docker-compose` per orchestrare Postgres, Redis e il server Ruggine
+- Esempio base:
+```dockerfile
+FROM rust:1.70-slim as builder
+WORKDIR /app
+COPY . .
+RUN cargo build --release --bin ruggine-server
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/ruggine-server /usr/local/bin/
+CMD ["ruggine-server"]
+```
 
 6) Avvio in produzione (systemd example)
-- Creare unit file `/etc/systemd/system/ruggine-server.service` che esegue il binario con le env caricate da `/etc/ruggine.env`.
+- Crea un service file per systemd:
+```ini
+[Unit]
+Description=Ruggine Chat Server
+After=network.target postgresql.service redis.service
+
+[Service]
+Type=simple
+User=ruggine
+WorkingDirectory=/opt/ruggine
+ExecStart=/opt/ruggine/ruggine-server
+EnvironmentFile=/etc/ruggine/server.env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+- Salva come `/etc/systemd/system/ruggine-server.service`
+- Abilita con: `systemctl enable ruggine-server.service`
 
 7) Healthchecks e monitoraggio
 - Aggiungi un healthcheck esterno (script che invia `/help` o `validate_session` con un token di test) e integra nel sistema di monitoring.
