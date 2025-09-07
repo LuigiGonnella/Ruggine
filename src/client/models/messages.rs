@@ -106,4 +106,7 @@ pub enum Message {
     FriendRequestsLoaded { requests: Vec<(String, String)> },
     InviteToGroupResult{success: bool, message: String},
     DiscardMessagesResult { success: bool, message: String },
+    // WebSocket connection messages
+    WebSocketConnected,
+    WebSocketError { error: String },
 }

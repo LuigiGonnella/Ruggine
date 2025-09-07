@@ -138,14 +138,33 @@ impl ChatAppState {
                         message: "Login successful".to_string(),
                     });
 
-                    // Auto-clear logger after 2 seconds (same behavior as other views)
-                    return Command::perform(
-                        async move {
-                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                            Message::ClearLog
-                        },
-                        |msg| msg,
-                    );
+                    // Initialize WebSocket connection after successful authentication
+                    let ws_svc = chat_service.clone();
+                    let ws_token = self.session_token.clone().unwrap_or_default();
+                    let ws_config = crate::server::config::ClientConfig::from_env();
+                    let ws_host_port = format!("{}:{}", ws_config.websocket_host, ws_config.websocket_port);
+                    
+                    return Command::batch([
+                        // Connect to WebSocket for real-time messaging
+                        Command::perform(
+                            async move {
+                                let mut guard = ws_svc.lock().await;
+                                match guard.connect_websocket(&ws_host_port, ws_token).await {
+                                    Ok(_) => Message::WebSocketConnected,
+                                    Err(e) => Message::WebSocketError { error: format!("WebSocket connection failed: {}", e) }
+                                }
+                            },
+                            |msg| msg,
+                        ),
+                        // Auto-clear logger after 2 seconds (same behavior as other views)
+                        Command::perform(
+                            async move {
+                                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                                Message::ClearLog
+                            },
+                            |msg| msg,
+                        )
+                    ]);
                 } else {
                     self.error_message = Some(message.clone());
                     self.logger.clear(); // Clear previous messages
@@ -1251,6 +1270,20 @@ impl ChatAppState {
                 self.group_polling_active = false;
                 self.app_state = AppState::MainActions;
                 return Command::<Message>::none();
+            }
+            Message::WebSocketConnected => {
+                self.logger.push(LogMessage {
+                    level: LogLevel::Success,
+                    message: "WebSocket connected - Real-time messaging enabled".to_string(),
+                });
+                return Command::none();
+            }
+            Message::WebSocketError { error } => {
+                self.logger.push(LogMessage {
+                    level: LogLevel::Error,
+                    message: format!("WebSocket error: {}", error),
+                });
+                return Command::none();
             }
             // Placeholder implementations for other messages
             _ => {
