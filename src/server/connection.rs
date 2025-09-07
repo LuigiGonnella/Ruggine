@@ -9,7 +9,7 @@ use std::io::BufReader as StdBufReader;
 
 // Optional TLS
 use tokio_rustls::TlsAcceptor;
-use rustls::{Certificate, PrivateKey, ServerConfig as RustlsConfig};
+use rustls::{ServerConfig as RustlsConfig};
 use rustls_pemfile::{certs, rsa_private_keys, pkcs8_private_keys};
 
 pub struct Server {
@@ -19,43 +19,82 @@ pub struct Server {
 }
 
 impl Server {
+    /// Configure TLS acceptor from environment variables
+    fn setup_tls_acceptor(&self) -> anyhow::Result<Option<TlsAcceptor>> {
+        if !self.config.enable_encryption {
+            println!("[TLS] TLS disabled in configuration");
+            return Ok(None);
+        }
+
+        let cert_path = std::env::var("TLS_CERT_PATH")
+            .map_err(|_| anyhow::anyhow!("TLS_CERT_PATH environment variable not set"))?;
+        let key_path = std::env::var("TLS_KEY_PATH")
+            .map_err(|_| anyhow::anyhow!("TLS_KEY_PATH environment variable not set"))?;
+
+        println!("[TLS] Loading certificate from: {}", cert_path);
+        println!("[TLS] Loading private key from: {}", key_path);
+
+        let cert_file = File::open(&cert_path)
+            .map_err(|e| anyhow::anyhow!("Failed to open certificate file '{}': {}", cert_path, e))?;
+        let mut cert_reader = StdBufReader::new(cert_file);
+        let cert_chain = certs(&mut cert_reader)?
+            .into_iter()
+            .map(|v| rustls::Certificate(v))
+            .collect::<Vec<_>>();
+
+        if cert_chain.is_empty() {
+            return Err(anyhow::anyhow!("No certificates found in {}", cert_path));
+        }
+        println!("[TLS] Loaded {} certificate(s)", cert_chain.len());
+
+        let key_file = File::open(&key_path)
+            .map_err(|e| anyhow::anyhow!("Failed to open private key file '{}': {}", key_path, e))?;
+        let mut key_reader = StdBufReader::new(key_file);
+        
+        // Try PKCS8 first, then RSA
+        let mut keys = pkcs8_private_keys(&mut key_reader)?;
+        if keys.is_empty() {
+            let key_file = File::open(&key_path)?;
+            let mut key_reader = StdBufReader::new(key_file);
+            keys = rsa_private_keys(&mut key_reader)?;
+        }
+
+        if keys.is_empty() {
+            return Err(anyhow::anyhow!("No private keys found in {}", key_path));
+        }
+        println!("[TLS] Loaded private key");
+
+        let priv_key = rustls::PrivateKey(keys.remove(0));
+        let rustls_cfg = RustlsConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain, priv_key)
+            .map_err(|e| anyhow::anyhow!("TLS configuration error: {}", e))?;
+
+        println!("[TLS] TLS configuration successful");
+        Ok(Some(TlsAcceptor::from(std::sync::Arc::new(rustls_cfg))))
+    }
+
     pub async fn run(&self, addr: &str) -> anyhow::Result<()> {
         let listener = TcpListener::bind(addr).await?;
         println!("[SERVER] Listening on {}", addr);
 
-        // Setup TLS acceptor if enabled and cert files are present
-        let tls_acceptor = if self.config.enable_encryption {
-            // Expect env variables TLS_CERT_PATH and TLS_KEY_PATH
-            if let (Ok(cert_path), Ok(key_path)) = (std::env::var("TLS_CERT_PATH"), std::env::var("TLS_KEY_PATH")) {
-                let cert_file = File::open(&cert_path)?;
-                let mut cert_reader = StdBufReader::new(cert_file);
-                let cert_chain = certs(&mut cert_reader)?.into_iter().map(Certificate).collect::<Vec<_>>();
-
-                let key_file = File::open(&key_path)?;
-                let mut key_reader = StdBufReader::new(key_file);
-                // Support pkcs8 or rsa keys
-                let mut keys = pkcs8_private_keys(&mut key_reader)?;
-                if keys.is_empty() {
-                    // retry rsa
-                    let key_file = File::open(&key_path)?;
-                    let mut key_reader = StdBufReader::new(key_file);
-                    keys = rsa_private_keys(&mut key_reader)?;
-                }
-                if keys.is_empty() {
-                    println!("[SERVER] TLS enabled but no private keys found in {}", key_path);
-                    None
+        // Setup TLS acceptor if enabled
+        let tls_acceptor = match self.setup_tls_acceptor() {
+            Ok(acceptor) => {
+                if acceptor.is_some() {
+                    println!("[TLS] TLS enabled and configured successfully");
                 } else {
-                    let priv_key = PrivateKey(keys.remove(0));
-                    let mut rustls_cfg = RustlsConfig::builder()
-                        .with_safe_defaults()
-                        .with_no_client_auth()
-                        .with_single_cert(cert_chain, priv_key)
-                        .map_err(|e| anyhow::anyhow!(e))?;
-                    rustls_cfg.alpn_protocols = vec![b"ruggine".to_vec()];
-                    Some(TlsAcceptor::from(std::sync::Arc::new(rustls_cfg)))
+                    println!("[TLS] TLS disabled");
                 }
-            } else { None }
-        } else { None };
+                acceptor
+            }
+            Err(e) => {
+                println!("[TLS] TLS configuration failed: {}", e);
+                println!("[TLS] Falling back to plain TCP");
+                None
+            }
+        };
 
         loop {
             let (stream, peer) = listener.accept().await?;
