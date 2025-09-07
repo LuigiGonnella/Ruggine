@@ -2,6 +2,7 @@
 // Entry point per il server ruggine_modulare
 use ruggine_modulare::server::{config::ServerConfig, database::Database, connection::Server};
 use ruggine_modulare::server::websocket::ChatWebSocketManager;
+use ruggine_modulare::utils::performance;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use log::{info, error};
@@ -28,6 +29,15 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(), 
         presence 
     };
+
+    // Start performance logger in background
+    let perf_log_path = std::env::var("PERFORMANCE_LOG_PATH")
+        .unwrap_or_else(|_| "data/ruggine_performance.log".to_string());
+    let perf_db = database.clone();
+    tokio::spawn(async move {
+        info!("📊 Starting performance logger - logging every 120 seconds to: {}", perf_log_path);
+        performance::start_performance_logger(perf_db, &perf_log_path).await;
+    });
 
     // Initialize WebSocket manager with Redis
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
