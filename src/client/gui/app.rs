@@ -2,6 +2,7 @@ use iced::{Application, Command, Element, Theme};
 use crate::client::models::app_state::{AppState, ChatAppState};
 use crate::client::models::messages::Message;
 use crate::client::services::chat_service::ChatService;
+use crate::client::services::message_parser::format_timestamp;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::client::utils::session_store;
@@ -38,13 +39,12 @@ impl Application for ChatApp {
                 let mut guard = svc.lock().await;
                 match guard.send_command(&host, format!("/validate_session {}", token)).await {
                     Ok(response) => {
-                        let cleaned = response.split("SESSION:").next().map(|s| s.trim().to_string()).unwrap_or_default();
                         if response.starts_with("OK:") {
                             // Extract username from response for auto-login display
-                            let username = cleaned.trim_start_matches("OK:").trim();
+                            let username = response.trim_start_matches("OK:").trim();
                             Message::AuthResult { 
                                 success: true, 
-                                message: format!("OK: {}", username), 
+                                message: username.to_string(), 
                                 token: Some(token) 
                             }
                         } else {
@@ -117,28 +117,133 @@ impl Application for ChatApp {
                     |msg| msg,
                 );
             }
-            Msg::StartMessagePolling { with } => {
-                if !self.state.polling_active {
-                    // Start message polling (log removed)
-                    self.state.polling_active = true;
-                    let svc = self.chat_service.clone();
-                    let token = self.state.session_token.clone().unwrap_or_default();
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    let with_clone = with.clone();
-                    return Command::perform(
-                        async move {
-                            let mut guard = svc.lock().await;
-                            match guard.get_private_messages(&host, &token, &with_clone).await {
-                                Ok(messages) => Msg::NewMessagesReceived { with: with_clone.clone(), messages },
-                                Err(_) => Msg::NewMessagesReceived { with: with_clone.clone(), messages: vec![] },
-                            }
-                        },
-                        |msg| msg,
-                    );
+            Msg::SessionMissing => {
+                // Token non valido o assente, vai alla schermata di registrazione
+                println!("[APP] Sessione non valida, vai alla registrazione");
+                self.state.app_state = AppState::Registration;
+                self.state.loading = false;
+                return Command::none();
+            }
+            Msg::AuthResult { success, message, token } => {
+                self.state.loading = false;
+                
+                if success {
+                    // Login/registrazione riuscita
+                    if let Some(token) = token {
+                        self.state.session_token = Some(token.clone());
+                        
+                        // Estrai l'username dal messaggio - gestisci diversi formati
+                        let message_content = message.trim_start_matches("OK:").trim();
+                        let username = if message_content.starts_with("Logged in as ") {
+                            // Format: "Logged in as luigi"
+                            message_content.strip_prefix("Logged in as ").unwrap_or(message_content)
+                        } else if message_content.starts_with("Registered as ") {
+                            // Format: "Registered as luigi"  
+                            message_content.strip_prefix("Registered as ").unwrap_or(message_content)
+                        } else {
+                            // Fallback: assume the whole content is the username
+                            message_content
+                        };
+                        
+                        println!("🔴 [DEBUG] AuthResult in app.rs - message: '{}', extracted username: '{}'", message, username);
+                        self.state.username = username.to_string();
+                        
+                        // Salva il token in modo sicuro
+                        crate::client::utils::session_store::save_session_token(&token);
+                        
+                        // Imposta l'utente corrente nel ChatService
+                        let svc = self.chat_service.clone();
+                        let username_clone = username.to_string();
+                        let token_clone = token.clone();
+                        
+                        // Avvia connessione WebSocket e inizia il loop di controllo messaggi
+                        return Command::perform(
+                            async move {
+                                let mut guard = svc.lock().await;
+                                guard.set_current_user(username_clone);
+                                
+                                // Connetti il WebSocket
+                                let cfg = crate::server::config::ClientConfig::from_env();
+                                let ws_port = cfg.default_port + 1; // WebSocket su porta +1
+                                println!("[APP] Tentativo connessione WebSocket a {}:{}", cfg.default_host, ws_port);
+                                match guard.connect_websocket(&cfg.default_host, ws_port, &token_clone).await {
+                                    Ok(()) => {
+                                        println!("[APP] WebSocket connesso, avviando controllo messaggi");
+                                        Msg::WebSocketConnected
+                                    }
+                                    Err(e) => {
+                                        println!("[APP] Errore connessione WebSocket: {}", e);
+                                        Msg::WebSocketError { error: format!("WebSocket connection failed: {}", e) }
+                                    }
+                                }
+                            },
+                            |msg| msg,
+                        );
+                    }
                 } else {
-                    return Command::<Message>::none();
+                    // Login/registrazione fallita
+                    self.state.error_message = Some(message);
                 }
+                
+                return Command::none();
+            }
+            Msg::WebSocketConnected => {
+                // WebSocket connesso, passa alla schermata principale
+                println!("[APP] WebSocket connesso, passando a MainActions");
+                self.state.app_state = AppState::MainActions;
+                
+                // Aggiungi messaggio di successo e pulisci il logger
+                use crate::client::gui::views::logger::{LogMessage, LogLevel};
+                self.state.logger.push(LogMessage {
+                    level: LogLevel::Success,
+                    message: format!("Login effettuato con successo come {}", self.state.username),
+                });
+                
+                // Pulisci il logger dopo un breve delay per mostrare il messaggio di successo
+                let cleanup_delay = Command::perform(
+                    async move {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+                        Msg::ClearLog
+                    },
+                    |msg| msg,
+                );
+                
+                // Avvia il loop di controllo messaggi
+                let websocket_loop = Command::perform(
+                    async move {
+                        println!("[APP] Starting WebSocket message loop...");
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        Msg::CheckWebSocketMessages
+                    },
+                    |msg| msg,
+                );
+                
+                return Command::batch(vec![cleanup_delay, websocket_loop]);
+            }
+            Msg::WebSocketError { error } => {
+                println!("[APP] Errore WebSocket: {}", error);
+                // Potresti aggiungere gestione errori qui (retry, notifica utente, etc.)
+                return Command::none();
+            }
+            Msg::StartMessagePolling { with } => {
+                // Load initial messages for the private chat
+                let svc = self.chat_service.clone();
+                let token = self.state.session_token.clone().unwrap_or_default();
+                let cfg = crate::server::config::ClientConfig::from_env();
+                let username = with.clone();
+                
+                return Command::perform(
+                    async move {
+                        match svc.lock().await.get_private_messages(&cfg.default_host, &token, &username).await {
+                            Ok(messages) => Msg::NewMessagesReceived { with: username, messages },
+                            Err(e) => {
+                                println!("[APP] Error loading initial messages for {}: {}", username, e);
+                                Msg::NewMessagesReceived { with: username, messages: vec![] }
+                            }
+                        }
+                    },
+                    |msg| msg,
+                );
             }
             Msg::StartGroupMessagePolling { group_id } => {
                 if !self.state.group_polling_active {
@@ -224,10 +329,13 @@ impl Application for ChatApp {
                 return Command::<Message>::none();
             }
             Msg::NewMessagesReceived { with, messages } => {
+                println!("[APP] NewMessagesReceived for {}: {} messages", with, messages.len());
                 if self.state.polling_active {
                     self.state.private_chats.insert(with.clone(), messages.to_vec());
                     // clear loading flag when messages arrive
                     self.state.loading_private_chats.remove(&with);
+                    
+                    println!("[APP] Updated private_chats cache for {}, total cached: {}", with, messages.len());
                     
                     // Continue polling
                     let svc = self.chat_service.clone();
@@ -270,6 +378,37 @@ impl Application for ChatApp {
                         },
                         move |messages| Msg::NewMessagesReceived { with: with.clone(), messages }
                     );
+            }
+            Msg::CheckWebSocketMessages => {
+                // Controlla se ci sono messaggi WebSocket in arrivo
+                println!("[APP] Checking for WebSocket messages...");
+                let svc = self.chat_service.clone();
+                return Command::perform(
+                    async move {
+                        let mut guard = svc.lock().await;
+                        if let Some(ws_message) = guard.try_receive_websocket_message().await {
+                            println!("[APP] Found WebSocket message, forwarding to handler");
+                            Msg::WebSocketMessageReceived(ws_message)
+                        } else {
+                            // Continua a controllare dopo un breve delay
+                            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                            Msg::CheckWebSocketMessages
+                        }
+                    },
+                    |msg| msg,
+                );
+            }
+            Msg::WebSocketMessageReceived(ws_msg) => {
+                // Forward the WebSocket message to app state for proper processing and UI refresh
+                let state_update = self.state.update(Message::WebSocketMessageReceived(ws_msg), &self.chat_service);
+                
+                // Immediately restart the WebSocket message checking loop
+                let restart_loop = Command::perform(
+                    async move { Msg::CheckWebSocketMessages },
+                    |msg| msg,
+                );
+                
+                return Command::batch([state_update, restart_loop]);
             }
             _ => {}
         }

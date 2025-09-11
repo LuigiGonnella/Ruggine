@@ -162,6 +162,7 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .style(iced::theme::Container::Custom(Box::new(header_appearance)));
 
     // User info section
+    println!("🟠 [DEBUG] MainActions rendering - state.username: '{}'", state.username);
     let user_info = Container::new(
         Row::new()
             .spacing(8)

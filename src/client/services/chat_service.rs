@@ -2,9 +2,8 @@ use tokio::net::TcpStream;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, timeout};
-use std::sync::Arc;
 use crate::client::services::message_parser;
-use crate::client::services::websocket_client::WebSocketClient;
+use crate::client::services::websocket_client::{WebSocketClient, WebSocketMessage};
 
 #[derive(Debug)]
 pub enum CommandType {
@@ -23,6 +22,8 @@ pub struct ChatService {
     pub websocket: Option<WebSocketClient>,
     /// Current user information
     pub current_user: Option<String>,
+    /// Receiver per messaggi WebSocket
+    pub websocket_receiver: Option<mpsc::UnboundedReceiver<WebSocketMessage>>,
 }
 
 impl ChatService {
@@ -31,7 +32,8 @@ impl ChatService {
             tx: None, 
             _bg: None, 
             websocket: None,
-            current_user: None 
+            current_user: None,
+            websocket_receiver: None,
         }
     }
     
@@ -41,6 +43,7 @@ impl ChatService {
         self._bg = None;
         self.websocket = None;
         self.current_user = None;
+        self.websocket_receiver = None;
     }
 
     /// Initialize WebSocket connection
@@ -50,6 +53,9 @@ impl ChatService {
         // Create new WebSocket client
         let mut ws_client = WebSocketClient::new(ws_url.clone());
         ws_client.set_session_token(session_token.to_string());
+        
+        // Get the receiver before connecting
+        self.websocket_receiver = ws_client.take_receiver();
         
         // Connect and authenticate
         ws_client.connect_with_auth().await.map_err(|e| anyhow::anyhow!("WebSocket connection failed: {}", e))?;
@@ -61,10 +67,37 @@ impl ChatService {
         Ok(())
     }
 
-    /// Receive a message from WebSocket
-    pub async fn receive_websocket_message(&self) -> Option<crate::server::websocket::WebSocketMessage> {
-        // For now, return None as WebSocketClient doesn't implement message receiving yet
-        None
+    /// Get the next WebSocket message if available
+    pub async fn try_receive_websocket_message(&mut self) -> Option<WebSocketMessage> {
+        if let Some(ref mut receiver) = self.websocket_receiver {
+            println!("[CHAT_SERVICE] Checking for WebSocket messages...");
+            match receiver.try_recv() {
+                Ok(msg) => {
+                    println!("[CHAT_SERVICE] Found WebSocket message: {:?}", msg);
+                    Some(msg)
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    // No messages available right now
+                    None
+                }
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    println!("[CHAT_SERVICE] WebSocket receiver disconnected!");
+                    None
+                }
+            }
+        } else {
+            println!("[CHAT_SERVICE] No WebSocket receiver available");
+            None
+        }
+    }
+
+    /// Wait for the next WebSocket message
+    pub async fn receive_websocket_message(&mut self) -> Option<WebSocketMessage> {
+        if let Some(ref mut receiver) = self.websocket_receiver {
+            receiver.recv().await
+        } else {
+            None
+        }
     }
 
     /// Check if WebSocket is connected
@@ -324,11 +357,26 @@ impl ChatService {
     }
 
     // Placeholder methods for later
-    /// Send a private message using the existing send_command implementation.
+    /// Send a private message using WebSocket if available, fallback to TCP.
     /// Returns the raw server response.
     pub async fn send_private_message(&mut self, host: &str, session_token: &str, to: &str, msg: &str) -> anyhow::Result<String> {
-        // For now, always use TCP as WebSocketClient doesn't implement message sending yet
-        // TODO: Implement WebSocket message sending
+        // Try WebSocket first if connected
+        if let Some(ref websocket) = self.websocket {
+            if websocket.is_connected() {
+                match websocket.send_private_message(to, msg).await {
+                    Ok(()) => {
+                        println!("[CHAT_SERVICE] Message sent via WebSocket to {}", to);
+                        return Ok("OK: Message sent via WebSocket".to_string());
+                    }
+                    Err(e) => {
+                        println!("[CHAT_SERVICE] WebSocket send failed: {}, falling back to TCP", e);
+                        // Fall through to TCP
+                    }
+                }
+            }
+        }
+        
+        // Fallback to TCP
         let cmd = format!("/send_private_message {} {} {}", session_token, to, msg);
         let resp = self.send_command(host, cmd).await?;
         Ok(resp)
@@ -339,6 +387,8 @@ impl ChatService {
         let cmd = format!("/get_private_messages {} {}", session_token, with);
         let resp = self.send_multiline_command(host, cmd).await?;
         
+        println!("[CHAT_SERVICE] Raw response: {}", resp);
+        
         // For private messages, participants are current user and the other user
         let participants = if let Some(current_user) = &self.current_user {
             vec![current_user.clone(), with.to_string()]
@@ -348,14 +398,35 @@ impl ChatService {
         
         let msgs = message_parser::parse_private_messages_with_participants(&resp, &participants)
             .map_err(|e| anyhow::anyhow!(e))?;
+        
+        println!("[CHAT_SERVICE] Parsed {} messages", msgs.len());
+        for (i, msg) in msgs.iter().enumerate() {
+            println!("[CHAT_SERVICE] Message {}: {} -> {}", i, msg.sender, msg.content);
+        }
+        
         Ok(msgs)
     }
 
-    /// Send a group message using the existing send_command implementation.
+    /// Send a group message using WebSocket if available, fallback to TCP.
     /// Returns the raw server response.
     pub async fn send_group_message(&mut self, host: &str, session_token: &str, group_id: &str, msg: &str) -> anyhow::Result<String> {
-        // For now, always use TCP as WebSocketClient doesn't implement message sending yet
-        // TODO: Implement WebSocket message sending
+        // Try WebSocket first if connected
+        if let Some(ref websocket) = self.websocket {
+            if websocket.is_connected() {
+                match websocket.send_group_message(group_id, msg).await {
+                    Ok(()) => {
+                        println!("[CHAT_SERVICE] Group message sent via WebSocket to group {}", group_id);
+                        return Ok("OK: Message sent via WebSocket".to_string());
+                    }
+                    Err(e) => {
+                        println!("[CHAT_SERVICE] WebSocket group send failed: {}, falling back to TCP", e);
+                        // Fall through to TCP
+                    }
+                }
+            }
+        }
+        
+        // Fallback to TCP
         let cmd = format!("/send_group_message {} {} {}", session_token, group_id, msg);
         let resp = self.send_command(host, cmd).await?;
         Ok(resp)
@@ -364,8 +435,9 @@ impl ChatService {
     /// Check for new messages via WebSocket (non-blocking)
     /// Returns messages if available, empty vector otherwise
     pub async fn poll_websocket_messages(&mut self) -> Vec<crate::client::models::app_state::ChatMessage> {
-        // For now, return empty vector as WebSocketClient doesn't implement message receiving yet
-        // TODO: Implement WebSocket message receiving
+        // This method is now obsolete - messages are handled through the WebSocket receiver
+        // in real-time via try_receive_websocket_message() and receive_websocket_message()
+        // Keep for backward compatibility but return empty vector
         Vec::new()
     }
 
@@ -378,6 +450,31 @@ impl ChatService {
     pub fn set_current_user(&mut self, username: String) {
         self.current_user = Some(username);
     }
+
+    /// Get group members for proper message decryption
+    pub async fn get_group_members(&mut self, host: &str, session_token: &str, group_id: &str) -> anyhow::Result<Vec<String>> {
+        let cmd = format!("/group_members {} {}", session_token, group_id);
+        let resp = self.send_command(host, cmd).await?;
+        
+        // Parse response format: "OK: Group members: user1, user2, user3"
+        if resp.starts_with("OK: Group members: ") {
+            let members_str = resp.strip_prefix("OK: Group members: ").unwrap_or("");
+            if members_str.is_empty() {
+                Ok(vec![])
+            } else {
+                let members: Vec<String> = members_str
+                    .split(", ")
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                Ok(members)
+            }
+        } else {
+            // If error or unexpected format, return empty vec (will fallback to plaintext)
+            println!("[CHAT_SERVICE] Failed to get group members: {}", resp);
+            Ok(vec![])
+        }
+    }
 }
 
 
@@ -385,13 +482,25 @@ impl ChatService {
 impl ChatService {
     /// Retrieve group messages and return them parsed as Vec<ChatMessage>.
     pub async fn get_group_messages(&mut self, host: &str, session_token: &str, group_id: &str) -> anyhow::Result<Vec<crate::client::models::app_state::ChatMessage>> {
+        // First get the group members for proper decryption
+        let participants = match self.get_group_members(host, session_token, group_id).await {
+            Ok(members) => {
+                println!("[CHAT_SERVICE] Got {} members for group {}: {:?}", members.len(), group_id, members);
+                members
+            }
+            Err(e) => {
+                println!("[CHAT_SERVICE] Failed to get group members for {}: {}, using empty participants", group_id, e);
+                vec![]
+            }
+        };
+
+        // Then get the group messages
         let cmd = format!("/get_group_messages {} {}", session_token, group_id);
         let resp = self.send_multiline_command(host, cmd).await?;
         
-        // For now, try decryption without participants (will fallback to plaintext)
-        // TODO: Get actual group members for proper decryption
-        let participants: Vec<String> = vec![];
-        let msgs = message_parser::parse_group_messages_with_participants(&resp, &participants).map_err(|e| anyhow::anyhow!(e))?;
+        // Parse messages with proper participants for decryption
+        let msgs = message_parser::parse_group_messages_with_participants(&resp, &participants)
+            .map_err(|e| anyhow::anyhow!(e))?;
         Ok(msgs)
     }
 }

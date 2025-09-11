@@ -105,8 +105,11 @@ pub enum Message {
     FriendsLoaded { friends: Vec<String> },
     FriendRequestsLoaded { requests: Vec<(String, String)> },
     InviteToGroupResult{success: bool, message: String},
-    DiscardMessagesResult { success: bool, message: String },
+    DiscardMessagesResult { success: bool, message: String, username: Option<String> },
     // WebSocket connection messages
     WebSocketConnected,
     WebSocketError { error: String },
+    // Real-time WebSocket messages
+    WebSocketMessageReceived(crate::client::services::websocket_client::WebSocketMessage),
+    CheckWebSocketMessages,
 }

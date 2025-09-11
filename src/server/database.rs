@@ -7,10 +7,60 @@ pub struct Database {
 
 impl Database {
     pub async fn connect(database_url: &str) -> Result<Self, sqlx::Error> {
+        println!("🔗 Attempting to connect to database: {}", database_url);
+        
+        // Extract file path from database URL to create directory if needed
+        let file_path = if database_url.starts_with("sqlite://") {
+            // Remove "sqlite://" prefix and any query parameters
+            let path_part = &database_url[9..];
+            if let Some(query_pos) = path_part.find('?') {
+                &path_part[..query_pos]
+            } else {
+                path_part
+            }
+        } else if database_url.starts_with("sqlite:") {
+            // Remove "sqlite:" prefix
+            &database_url[7..]
+        } else {
+            database_url
+        };
+        
+        println!("📁 Database file path: {}", file_path);
+        
+        if let Some(parent) = std::path::Path::new(file_path).parent() {
+            println!("📂 Parent directory: {:?}", parent);
+            if !parent.as_os_str().is_empty() && !parent.exists() {
+                println!("📁 Directory does not exist, creating...");
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    println!("❌ Failed to create directory: {}", e);
+                    sqlx::Error::Configuration(Box::new(e))
+                })?;
+                println!("✅ Created directory: {:?}", parent);
+            } else if parent.as_os_str().is_empty() {
+                println!("📁 Using current directory");
+            } else {
+                println!("📁 Directory already exists: {:?}", parent);
+            }
+        }
+        
+        // Check if the file already exists
+        if std::path::Path::new(file_path).exists() {
+            println!("📄 Database file already exists");
+        } else {
+            println!("📄 Database file does not exist, SQLite will create it");
+        }
+        
+        println!("🔗 Creating SQLite connection pool...");
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
             .connect(database_url)
-            .await?;
+            .await
+            .map_err(|e| {
+                println!("❌ SQLite connection failed: {}", e);
+                e
+            })?;
+        
+        println!("✅ Database connection successful!");
         Ok(Self { pool })
     }
 

@@ -94,7 +94,11 @@ impl ChatAppState {
                 self.manual_host = host;
             }
             Message::UsernameChanged(username) => {
-                self.username = username;
+                println!("🔵 [DEBUG] UsernameChanged event triggered");
+                println!("🔵 [DEBUG] Previous username: '{}'", self.username);
+                println!("🔵 [DEBUG] New username: '{}'", username);
+                self.username = username.clone();
+                println!("🔵 [DEBUG] After update - username: '{}'", self.username);
             }
             Message::PasswordChanged(password) => {
                 self.password = password;
@@ -110,6 +114,8 @@ impl ChatAppState {
                 self.error_message = None;
             }
             Message::AuthResult { success, message, token } => {
+                println!("🟢 [DEBUG] AuthResult received - success: {}, message: '{}', token present: {}", success, message, token.is_some());
+                println!("🟢 [DEBUG] Current username before AuthResult: '{}'", self.username);
                 self.loading = false;
                 if success {
             
@@ -123,12 +129,52 @@ impl ChatAppState {
                         
                         // Extract username from success message for auto-login cases
                         if message.starts_with("OK:") {
+                            println!("🟡 [DEBUG] Processing server response: '{}'", message);
                             let username_part = message.trim_start_matches("OK:").trim();
-                            if !username_part.is_empty() && self.username.is_empty() {
-                                self.username = username_part.to_string();
+                            println!("🟡 [DEBUG] After removing 'OK:': '{}'", username_part);
+                            
+                            // Check for different response formats:
+                            let actual_username = if username_part.contains("Logged in as") {
+                                // Format: "Logged in as luigi SESSION: ..."
+                                if let Some(after_logged_in) = username_part.strip_prefix("Logged in as ") {
+                                    // Extract just the username part before " SESSION:"
+                                    let username_only = after_logged_in.split(" SESSION:").next()
+                                        .unwrap_or(after_logged_in)
+                                        .trim();
+                                    println!("🟡 [DEBUG] Extracted from 'Logged in as': '{}'", username_only);
+                                    username_only
+                                } else {
+                                    // Fallback: split by "logged in as" and take the last part
+                                    let extracted = username_part.split("logged in as").last()
+                                        .map(|s| s.trim())
+                                        .unwrap_or("");
+                                    println!("🟡 [DEBUG] Fallback extraction: '{}'", extracted);
+                                    extracted
+                                }
+                            } else {
+                                // Format: just the username
+                                println!("🟡 [DEBUG] No 'Logged in as' found, using whole part: '{}'", username_part);
+                                username_part
+                            };
+                            
+                            println!("🟡 [DEBUG] Final extracted username: '{}'", actual_username);
+                            println!("🟡 [DEBUG] Current username state: '{}'", self.username);
+                            println!("🟡 [DEBUG] Should set username? (actual_username not empty: {}, self.username empty: {})", 
+                                    !actual_username.is_empty(), self.username.is_empty());
+                            
+                            if !actual_username.is_empty() && self.username.is_empty() {
+                                println!("🟡 [DEBUG] Setting username from server response to: '{}'", actual_username);
+                                self.username = actual_username.to_string();
+                                println!("🟡 [DEBUG] After setting - username: '{}'", self.username);
+                            } else {
+                                println!("🟡 [DEBUG] NOT setting username from server (actual_username: '{}', username empty: {})", 
+                                        actual_username, self.username.is_empty());
                             }
+                        } else {
+                            println!("🟡 [DEBUG] Server response does not start with 'OK:': '{}'", message);
                         }
                     }
+                    println!("🟢 [DEBUG] About to transition to MainActions - username: '{}'", self.username);
                     self.app_state = AppState::MainActions;
                     // Clear any previous error messages and logger for clean transition
                     self.error_message = None;
@@ -256,14 +302,19 @@ impl ChatAppState {
             Message::OpenPrivateChat(username) => {
                 self.app_state = AppState::PrivateChat(username.clone());
                 self.current_message_input.clear();
-                // Mark this private chat as loading so the UI shows a loader
-                self.loading_private_chats.insert(username.clone());
-
-                // Start message polling for real-time updates
-                return Command::perform(
-                    async move { Message::StartMessagePolling { with: username } },
-                    |msg| msg,
-                );
+                
+                // If we already have messages cached, don't mark as loading
+                if !self.private_chats.contains_key(&username) {
+                    self.loading_private_chats.insert(username.clone());
+                    
+                    // Load messages once - with WebSocket connected, no need for polling
+                    return Command::perform(
+                        async move { Message::LoadPrivateMessages { with: username } },
+                        |msg| msg,
+                    );
+                }
+                
+                return Command::none();
             }
             Message::OpenGroupChat(group_id, group_name) => {
                 self.app_state = AppState::GroupChat(group_id.clone(), group_name.clone());
@@ -1197,12 +1248,24 @@ impl ChatAppState {
                             match guard.send_command(&host, format!("/delete_private_messages {} {}", token_clone, with_clone)).await {
                                 Ok(response) => {
                                     if response.starts_with("OK:") {
-                                        Message::DiscardMessagesResult { success: true, message: "Messages discarded successfully".to_string() }
+                                        Message::DiscardMessagesResult { 
+                                            success: true, 
+                                            message: "Messages discarded successfully".to_string(),
+                                            username: Some(with_clone)
+                                        }
                                     } else {
-                                        Message::DiscardMessagesResult { success: false, message: response }
+                                        Message::DiscardMessagesResult { 
+                                            success: false, 
+                                            message: response,
+                                            username: Some(with_clone)
+                                        }
                                     }
                                 }
-                                Err(e) => Message::DiscardMessagesResult { success: false, message: format!("Error: {}", e) }
+                                Err(e) => Message::DiscardMessagesResult { 
+                                    success: false, 
+                                    message: format!("Error: {}", e),
+                                    username: Some(with_clone)
+                                }
                             }
                         },
                         |msg| msg,
@@ -1223,12 +1286,24 @@ impl ChatAppState {
                             match guard.send_command(&host, format!("/delete_group_messages {} {}", token_clone, group_id_clone)).await {
                                 Ok(response) => {
                                     if response.starts_with("OK:") {
-                                        Message::DiscardMessagesResult { success: true, message: "Group messages discarded successfully".to_string() }
+                                        Message::DiscardMessagesResult { 
+                                            success: true, 
+                                            message: "Group messages discarded successfully".to_string(),
+                                            username: None  // For group messages, username is None
+                                        }
                                     } else {
-                                        Message::DiscardMessagesResult { success: false, message: response }
+                                        Message::DiscardMessagesResult { 
+                                            success: false, 
+                                            message: response,
+                                            username: None
+                                        }
                                     }
                                 }
-                                Err(e) => Message::DiscardMessagesResult { success: false, message: format!("Error: {}", e) }
+                                Err(e) => Message::DiscardMessagesResult { 
+                                    success: false, 
+                                    message: format!("Error: {}", e),
+                                    username: None
+                                }
                             }
                         },
                         |msg| msg,
@@ -1236,13 +1311,19 @@ impl ChatAppState {
                 }
                 return Command::none();
             }
-            Message::DiscardMessagesResult { success, message } => {
+            Message::DiscardMessagesResult { success, message, username } => {
                 use crate::client::gui::views::logger::{LogMessage, LogLevel};
                 if success {
                     self.logger.push(LogMessage {
                         level: LogLevel::Success,
                         message: message.clone(),
                     });
+                    
+                    // Clear messages from local cache for the specific user
+                    if let Some(target_user) = username {
+                        println!("[DISCARD] Clearing local cache for user: {}", target_user);
+                        self.private_chats.insert(target_user, Vec::new());
+                    }
                 } else {
                     self.logger.push(LogMessage {
                         level: LogLevel::Error,
@@ -1282,6 +1363,89 @@ impl ChatAppState {
                     level: LogLevel::Error,
                     message: format!("WebSocket error: {}", error),
                 });
+                return Command::none();
+            }
+            Message::StartMessagePolling { with } => {
+                // With WebSocket connected, we ONLY load messages once initially
+                // No polling needed - WebSocket will deliver new messages in real-time
+                if !self.private_chats.contains_key(&with) {
+                    self.loading_private_chats.insert(with.clone());
+                    println!("[APP] Loading initial messages for {} (WebSocket mode - no polling)", with);
+                    return Command::perform(
+                        async move { Message::LoadPrivateMessages { with } },
+                        |msg| msg,
+                    );
+                } else {
+                    println!("[APP] Messages already cached for {} - no need to reload", with);
+                }
+                return Command::none();
+            }
+            Message::WebSocketMessageReceived(ws_msg) => {
+                match ws_msg {
+                    crate::client::services::websocket_client::WebSocketMessage::NewMessage(chat_msg) => {
+                        println!("[APP] Received WebSocket message from {}: {}", chat_msg.from_user, chat_msg.content);
+                        
+                        // Convert IncomingChatMessage to ChatMessage
+                        let app_msg = ChatMessage {
+                            sender: chat_msg.from_user.clone(),
+                            content: chat_msg.content.clone(),
+                            timestamp: chat_msg.timestamp,
+                            formatted_time: chrono::DateTime::from_timestamp(chat_msg.timestamp, 0)
+                                .map(|dt| dt.format("%H:%M").to_string())
+                                .unwrap_or_else(|| "??:??".to_string()),
+                            sent_at: chat_msg.timestamp,
+                        };
+                        
+                        // Determine the chat key (who we're chatting with)
+                        let chat_key = if chat_msg.chat_type == "private" {
+                            if let Some(to_user) = &chat_msg.to_user {
+                                if to_user == &self.username {
+                                    // Message sent TO us, chat key is the sender
+                                    chat_msg.from_user.clone()
+                                } else {
+                                    // Message sent BY us, chat key is the recipient
+                                    to_user.clone()
+                                }
+                            } else {
+                                chat_msg.from_user.clone()
+                            }
+                        } else {
+                            // Group message handling would go here
+                            return Command::none();
+                        };
+                        
+                        // Add message to the appropriate chat
+                        self.private_chats.entry(chat_key.clone())
+                            .or_insert_with(Vec::new)
+                            .push(app_msg);
+                        
+                        println!("[APP] Added WebSocket message to chat with {}", chat_key);
+                        
+                        // If we're currently viewing this chat, auto-scroll to bottom to trigger UI update
+                        if let AppState::PrivateChat(current_chat) = &self.app_state {
+                            if current_chat == &chat_key {
+                                // We're currently viewing this chat - just scroll to bottom
+                                return scrollable::snap_to(
+                                    scrollable::Id::new("messages_scroll"),
+                                    scrollable::RelativeOffset::END
+                                );
+                            }
+                        }
+                        
+                        // Not viewing this chat currently, just add the message silently
+                        return Command::none();
+                    }
+                    crate::client::services::websocket_client::WebSocketMessage::UserStatusUpdate { user_id, online } => {
+                        println!("[APP] User {} is now {}", user_id, if online { "online" } else { "offline" });
+                    }
+                    crate::client::services::websocket_client::WebSocketMessage::Error(error) => {
+                        println!("[APP] WebSocket error: {}", error);
+                        self.logger.push(LogMessage {
+                            level: LogLevel::Error,
+                            message: format!("WebSocket error: {}", error),
+                        });
+                    }
+                }
                 return Command::none();
             }
             // Placeholder implementations for other messages

@@ -7,7 +7,18 @@ use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 use redis::aio::ConnectionManager;
 use crate::server::database::Database;
+use crate::server::messages;
 use sqlx::Row;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutgoingChatMessage {
+    pub message_type: String, // "send_message"
+    pub chat_type: String,    // "private" or "group"
+    pub to_user: Option<String>, // per messaggi privati
+    pub group_id: Option<String>, // per messaggi di gruppo
+    pub content: String,
+    pub session_token: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketMessage {
@@ -111,6 +122,7 @@ impl ChatWebSocketManager {
         &self,
         ws_stream: WebSocketStream<tokio::net::TcpStream>,
         db: Arc<Database>,
+        config: crate::server::config::ServerConfig,
     ) -> anyhow::Result<()> {
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
         
@@ -201,7 +213,7 @@ impl ChatWebSocketManager {
             let rebuilt_stream = ws_sender.reunite(ws_receiver)
                 .map_err(|e| anyhow::anyhow!("Failed to reunite WebSocket stream: {}", e))?;
             
-            return self.add_connection(rebuilt_stream, user_id).await;
+            return self.add_connection(rebuilt_stream, user_id, auth_message.session_token, db, config).await;
         } else {
             // Authentication failed
             let error_response = AuthResponse {
@@ -222,6 +234,9 @@ impl ChatWebSocketManager {
         &self,
         ws_stream: WebSocketStream<tokio::net::TcpStream>,
         user_id: UserId,
+        session_token: String,
+        db: Arc<Database>,
+        config: crate::server::config::ServerConfig,
     ) -> anyhow::Result<()> {
         let client_id = Uuid::new_v4().to_string();
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
@@ -258,11 +273,147 @@ impl ChatWebSocketManager {
         });
 
         // Task per ricevere messaggi dal client
+        let db_clone = db.clone();
+        let config_clone = config.clone();
+        let session_token_clone = session_token.clone();
         let receive_task = tokio::spawn(async move {
             while let Some(message) = ws_receiver.next().await {
                 match message {
                     Ok(Message::Text(text)) => {
-                        if let Ok(ws_message) = serde_json::from_str::<WebSocketMessage>(&text) {
+                        println!("[WS:RECV] Received message: {}", text);
+                        
+                        // Try to parse as OutgoingChatMessage (client format)
+                        if let Ok(outgoing_msg) = serde_json::from_str::<OutgoingChatMessage>(&text) {
+                            println!("[WS:RECV] Parsed OutgoingChatMessage - chat_type: {}, content: {}", outgoing_msg.chat_type, outgoing_msg.content);
+                            
+                            if outgoing_msg.message_type == "send_message" {
+                                match outgoing_msg.chat_type.as_str() {
+                                    "private" => {
+                                        if let Some(to_user) = &outgoing_msg.to_user {
+                                            println!("[WS:DB] Saving private message to database...");
+                                            let result = messages::send_private_message(
+                                                db_clone.clone(),
+                                                &session_token_clone,
+                                                to_user,
+                                                &outgoing_msg.content,
+                                                &config_clone
+                                            ).await;
+                                            println!("[WS:DB] Private message save result: {}", result);
+                                            
+                                            // If message was saved successfully, broadcast via WebSocket
+                                            if result.starts_with("OK:") {
+                                                // Get the username from user_id
+                                                let username = match sqlx::query("SELECT username FROM users WHERE id = ?")
+                                                    .bind(&user_id_clone)
+                                                    .fetch_optional(&db_clone.pool)
+                                                    .await
+                                                {
+                                                    Ok(Some(row)) => row.get::<String, _>("username"),
+                                                    Ok(None) => {
+                                                        println!("[WS:ERROR] User not found for ID: {}", user_id_clone);
+                                                        user_id_clone.clone()
+                                                    }
+                                                    Err(e) => {
+                                                        println!("[WS:ERROR] Database error getting username: {}", e);
+                                                        user_id_clone.clone()
+                                                    }
+                                                };
+                                                
+                                                // Create incoming message format for client
+                                                let incoming_msg = serde_json::json!({
+                                                    "message_type": "new_message",
+                                                    "chat_type": "private",
+                                                    "from_user": username,
+                                                    "to_user": to_user,
+                                                    "content": outgoing_msg.content,
+                                                    "timestamp": chrono::Utc::now().timestamp()
+                                                });
+                                                
+                                                println!("[WS:BROADCAST] Broadcasting private message via WebSocket");
+                                                println!("[WS:DEBUG] Looking for target user: '{}' (this should be a user_id, not username)", to_user);
+                                                
+                                                // PROBLEM: to_user is a username, but user_connections uses user_id as key
+                                                // First convert username to user_id
+                                                let target_user_id = match sqlx::query("SELECT id FROM users WHERE username = ?")
+                                                    .bind(to_user)
+                                                    .fetch_optional(&db_clone.pool)
+                                                    .await
+                                                {
+                                                    Ok(Some(row)) => row.get::<String, _>("id"),
+                                                    Ok(None) => {
+                                                        println!("[WS:ERROR] Target username '{}' not found in database", to_user);
+                                                        return;
+                                                    }
+                                                    Err(e) => {
+                                                        println!("[WS:ERROR] Database error getting user_id for username '{}': {}", to_user, e);
+                                                        return;
+                                                    }
+                                                };
+                                                
+                                                println!("[WS:DEBUG] Converted username '{}' to user_id '{}'", to_user, target_user_id);
+                                                
+                                                // Find the target user's connection and send directly
+                                                let user_connections_guard = user_connections_clone.lock().await;
+                                                let connections_guard = connections_clone.lock().await;
+                                                
+                                                if let Some(client_id) = user_connections_guard.get(&target_user_id) {
+                                                    if let Some(connection) = connections_guard.get(client_id) {
+                                                        let json_msg = serde_json::to_string(&incoming_msg).unwrap_or_default();
+                                                        let _ = connection.sender.send(tokio_tungstenite::tungstenite::Message::Text(json_msg));
+                                                        println!("[WS:BROADCAST] ✅ Delivered message to user {} (user_id: {})", to_user, target_user_id);
+                                                    } else {
+                                                        println!("[WS:BROADCAST] ❌ Client ID found but connection not found for user {}", to_user);
+                                                    }
+                                                } else {
+                                                    println!("[WS:BROADCAST] ❌ User {} (user_id: {}) not connected via WebSocket", to_user, target_user_id);
+                                                }
+                                                
+                                                // Also send to sender (echo back for confirmation)
+                                                if let Some(sender_client_id) = user_connections_guard.get(&user_id_clone) {
+                                                    if let Some(sender_connection) = connections_guard.get(sender_client_id) {
+                                                        let json_msg = serde_json::to_string(&incoming_msg).unwrap_or_default();
+                                                        let _ = sender_connection.sender.send(tokio_tungstenite::tungstenite::Message::Text(json_msg));
+                                                        println!("[WS:BROADCAST] Echoed message back to sender");
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    "group" => {
+                                        println!("[WS:DB] Group message handling not yet implemented via WebSocket");
+                                    }
+                                    _ => {
+                                        println!("[WS:DB] Unknown chat_type: {}", outgoing_msg.chat_type);
+                                    }
+                                }
+                            }
+                        }
+                        // Fallback: try to parse as WebSocketMessage (old format)
+                        else if let Ok(ws_message) = serde_json::from_str::<WebSocketMessage>(&text) {
+                            println!("[WS:RECV] Parsed WebSocketMessage type: {:?}, target: {}, content: {}", ws_message.message_type, ws_message.target, ws_message.content);
+                            // SAVE MESSAGE TO DATABASE FIRST
+                            match ws_message.message_type {
+                                MessageType::PrivateMessage => {
+                                    println!("[WS:DB] Saving private message to database...");
+                                    // Save private message to database
+                                    let result = messages::send_private_message(
+                                        db_clone.clone(),
+                                        &session_token_clone,
+                                        &ws_message.target,
+                                        &ws_message.content,
+                                        &config_clone
+                                    ).await;
+                                    println!("[WS:DB] Private message save result: {}", result);
+                                }
+                                MessageType::GroupMessage => {
+                                    // TODO: Implement group message saving if needed
+                                    println!("[WS:DB] Group message handling not yet implemented via WebSocket");
+                                }
+                                _ => {
+                                    println!("[WS:DB] Unknown message type, not saving to database");
+                                }
+                            }
+                            
                             // Invia il messaggio tramite broadcaster locale
                             let _ = message_broadcaster.send(ws_message.clone());
                             
@@ -280,6 +431,8 @@ impl ChatWebSocketManager {
                                 .arg(&serialized)
                                 .query_async(&mut *redis_conn)
                                 .await;
+                        } else {
+                            println!("[WS:RECV] Failed to parse JSON message: {}", text);
                         }
                     }
                     Ok(Message::Close(_)) => break,

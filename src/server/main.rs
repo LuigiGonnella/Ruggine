@@ -10,6 +10,8 @@ use log::{info, error};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Configura logging
+    let log_level = std::env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string());
+    std::env::set_var("RUST_LOG", &log_level); //setto env var per usare log::info
     env_logger::init();
 
     let config = ServerConfig::from_env();
@@ -23,6 +25,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize database and server
     let database = Arc::new(Database::connect(&config.database_url).await?);
+    
+    // Run database migrations to create tables if they don't exist
+    info!("🗄️ Running database migrations...");
+    database.migrate().await.map_err(|e| {
+        error!("Database migration failed: {}", e);
+        e
+    })?;
+    info!("✅ Database migrations completed successfully");
+    
     let presence = ruggine_modulare::server::presence::PresenceRegistry::new();
     let server = Server { 
         db: database.clone(), 
@@ -51,8 +62,9 @@ async fn main() -> anyhow::Result<()> {
     let ws_host = config.host.clone();
     let ws_manager_clone = ws_manager.clone();
     let database_clone = database.clone();
+    let config_clone = config.clone();
     tokio::spawn(async move {
-        if let Err(e) = start_websocket_server(&format!("{}:{}", ws_host, ws_port), ws_manager_clone, database_clone).await {
+        if let Err(e) = start_websocket_server(&format!("{}:{}", ws_host, ws_port), ws_manager_clone, database_clone, config_clone).await {
             error!("WebSocket server error: {}", e);
         }
     });
@@ -66,7 +78,8 @@ async fn main() -> anyhow::Result<()> {
 async fn start_websocket_server(
     addr: &str, 
     ws_manager: Arc<ChatWebSocketManager>,
-    database: Arc<Database>
+    database: Arc<Database>,
+    config: ServerConfig
 ) -> anyhow::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     info!("WebSocket server listening on {}", addr);
@@ -75,12 +88,13 @@ async fn start_websocket_server(
         info!("New WebSocket connection from {}", addr);
         let ws_manager = ws_manager.clone();
         let database = database.clone();
+        let config = config.clone();
         
         tokio::spawn(async move {
             match tokio_tungstenite::accept_async(stream).await {
                 Ok(ws_stream) => {
                     // Usa l'autenticazione corretta invece di user_id fittizio
-                    if let Err(e) = ws_manager.handle_authenticated_connection(ws_stream, database).await {
+                    if let Err(e) = ws_manager.handle_authenticated_connection(ws_stream, database, config).await {
                         error!("Error handling WebSocket connection: {}", e);
                     }
                 }
