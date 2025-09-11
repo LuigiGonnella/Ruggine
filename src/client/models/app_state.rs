@@ -90,6 +90,10 @@ impl ChatAppState {
         use crate::client::services::users_service::UsersService;
         
         match message {
+            Message::NoOp => {
+                // No operation - just return none
+                return Command::none();
+            }
             Message::ManualHostChanged(host) => {
                 self.manual_host = host;
             }
@@ -322,9 +326,9 @@ impl ChatAppState {
                 // Mark this group chat as loading so the UI shows a loader
                 self.loading_group_chats.insert(group_id.clone());
 
-                // Start message polling for real-time updates
+                // Load initial messages via WebSocket (no polling needed)
                 return Command::perform(
-                    async move { Message::StartGroupMessagePolling { group_id } },
+                    async move { Message::LoadGroupMessages { group_id } },
                     |msg| msg,
                 );
             }
@@ -443,18 +447,24 @@ impl ChatAppState {
             let group_members_resp = guard.send_command(&host, format!("/group_members {} {}", token_clone, group_id_for_filter)).await.unwrap_or_default();
                         drop(guard);
                         
-                        // Parse group members (assuming format "OK: Members: user1, user2")
-                        let existing_members: Vec<String> = if group_members_resp.starts_with("OK: Members:") {
-                            group_members_resp.trim_start_matches("OK: Members:").trim()
+                        // Parse group members (format "OK: Group members: user1, user2")
+                        let existing_members: Vec<String> = if group_members_resp.starts_with("OK: Group members:") {
+                            group_members_resp.trim_start_matches("OK: Group members:").trim()
                                 .split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
                         } else {
                             vec![]
                         };
                         
-                        // Filter out existing members
+                        println!("[INVITE] Group members response: {}", group_members_resp);
+                        println!("[INVITE] Parsed existing members: {:?}", existing_members);
+                        println!("[INVITE] All users before filter: {:?}", all_users);
+                        
+                        // Filter out existing members and current user
                         let filtered_users: Vec<String> = all_users.into_iter()
                             .filter(|user| !existing_members.contains(user))
                             .collect();
+                        
+                        println!("[INVITE] Filtered users (available to invite): {:?}", filtered_users);
                         
                         Message::UsersListLoaded { kind: "Invite".to_string(), list: filtered_users }
                     },
@@ -1079,7 +1089,7 @@ impl ChatAppState {
                                 async move {
                                     let mut guard = svc.lock().await;
                                     let _ = guard.send_group_message(&host, &token_clone, &group_id_clone, &message).await;
-                                    Message::TriggerImmediateGroupRefresh { group_id: group_id_clone }
+                                    Message::NoOp  // No immediate refresh needed - WebSocket will handle it
                                 },
                                 |msg| msg,
                             ),
@@ -1105,7 +1115,13 @@ impl ChatAppState {
                             let mut guard = svc.lock().await;
                             match guard.get_group_messages(&host, &token_clone, &group_id_clone).await {
                                 Ok(messages) => Message::GroupMessagesLoaded { group_id: group_id_clone, messages },
-                                Err(_) => Message::GroupMessagesLoaded { group_id: group_id_clone, messages: vec![] },
+                                Err(e) => {
+                                    if e.to_string().contains("NOT_A_MEMBER") {
+                                        Message::NotAMember { group_id: group_id_clone }
+                                    } else {
+                                        Message::GroupMessagesLoaded { group_id: group_id_clone, messages: vec![] }
+                                    }
+                                }
                             }
                         },
                         |msg| msg,
@@ -1192,7 +1208,18 @@ impl ChatAppState {
                         level: LogLevel::Success,
                         message: message.clone(),
                     });
-                    // Reload groups list
+                    
+                    // CRITICAL: Stop all polling immediately when leaving group
+                    self.polling_active = false;
+                    self.group_polling_active = false;
+                    
+                    // Clear group chat data for security
+                    self.group_chats.clear();
+                    
+                    // Return to My Groups view
+                    self.app_state = AppState::MyGroups;
+                    
+                    // Reload groups list to reflect the change
                     let svc = chat_service.clone();
                     let token = self.session_token.clone().unwrap_or_default();
                     let cfg = crate::server::config::ClientConfig::from_env();
@@ -1233,6 +1260,62 @@ impl ChatAppState {
                         level: LogLevel::Error,
                         message: message.clone(),
                     });
+                }
+            }
+            Message::NotAMember { group_id } => {
+                use crate::client::gui::views::logger::{LogMessage, LogLevel};
+                self.logger.push(LogMessage {
+                    level: LogLevel::Error,
+                    message: format!("You are no longer a member of group: {}", group_id),
+                });
+                
+                // CRITICAL: Stop all polling immediately
+                self.polling_active = false;
+                self.group_polling_active = false;
+                
+                // Clear group data
+                self.group_chats.remove(&group_id);
+                if let AppState::GroupChat(current_group_id, _) = &self.app_state {
+                    if current_group_id == &group_id {
+                        // Navigate back to MyGroups if we're in this group
+                        self.app_state = AppState::MyGroups;
+                        
+                        // Reload groups list
+                        let svc = chat_service.clone();
+                        let token = self.session_token.clone().unwrap_or_default();
+                        let cfg = crate::server::config::ClientConfig::from_env();
+                        let host = format!("{}:{}", cfg.default_host, cfg.default_port);
+                        return Command::perform(
+                            async move {
+                                let mut guard = svc.lock().await;
+                                let cmd = format!("/my_groups {}", token);
+                                match guard.send_command(&host, cmd).await {
+                                    Ok(response) => {
+                                        if response.starts_with("OK: My groups:") {
+                                            let after = response.splitn(3, ':').nth(2).unwrap_or("");
+                                            let groups: Vec<(String, String, usize)> = after
+                                                .split(',')
+                                                .map(|s| s.trim())
+                                                .filter(|s| !s.is_empty())
+                                                .map(|s| {
+                                                    if let Some((id, name)) = s.split_once(':') {
+                                                        (id.to_string(), name.to_string(), 0)
+                                                    } else {
+                                                        (s.to_string(), s.to_string(), 0)
+                                                    }
+                                                })
+                                                .collect();
+                                            Message::MyGroupsLoaded { groups }
+                                        } else {
+                                            Message::MyGroupsLoaded { groups: vec![] }
+                                        }
+                                    },
+                                    Err(_) => Message::MyGroupsLoaded { groups: vec![] },
+                                }
+                            },
+                            |msg| msg
+                        );
+                    }
                 }
             }
             Message::DiscardPrivateMessages { with } => {
@@ -1409,26 +1492,79 @@ impl ChatAppState {
                             } else {
                                 chat_msg.from_user.clone()
                             }
+                        } else if chat_msg.chat_type == "group" {
+                            // Group message - use group_id as chat key
+                            if let Some(group_id) = &chat_msg.group_id {
+                                format!("group_{}", group_id)
+                            } else {
+                                println!("[APP] ERROR: Group message without group_id");
+                                return Command::none();
+                            }
                         } else {
-                            // Group message handling would go here
+                            println!("[APP] ERROR: Unknown chat_type: {}", chat_msg.chat_type);
                             return Command::none();
                         };
                         
-                        // Add message to the appropriate chat
-                        self.private_chats.entry(chat_key.clone())
-                            .or_insert_with(Vec::new)
-                            .push(app_msg);
-                        
-                        println!("[APP] Added WebSocket message to chat with {}", chat_key);
+                        // Add message to the appropriate chat (with deduplication)
+                        if chat_msg.chat_type == "private" {
+                            let messages = self.private_chats.entry(chat_key.clone())
+                                .or_insert_with(Vec::new);
+                            
+                            // Check for duplicates before adding
+                            let is_duplicate = messages.iter().any(|existing_msg| {
+                                existing_msg.sender == app_msg.sender &&
+                                existing_msg.content == app_msg.content &&
+                                (existing_msg.timestamp - app_msg.timestamp).abs() < 2  // Within 2 seconds
+                            });
+                            
+                            if !is_duplicate {
+                                messages.push(app_msg);
+                                println!("[APP] Added WebSocket private message to chat with {}", chat_key);
+                            } else {
+                                println!("[APP] Skipped duplicate WebSocket private message for {}", chat_key);
+                            }
+                        } else if chat_msg.chat_type == "group" {
+                            // Extract just the group_id from "group_groupid" format
+                            let group_id = chat_key.strip_prefix("group_").unwrap_or(&chat_key);
+                            let messages = self.group_chats.entry(group_id.to_string())
+                                .or_insert_with(Vec::new);
+                            
+                            // Check for duplicates before adding
+                            let is_duplicate = messages.iter().any(|existing_msg| {
+                                existing_msg.sender == app_msg.sender &&
+                                existing_msg.content == app_msg.content &&
+                                (existing_msg.timestamp - app_msg.timestamp).abs() < 2  // Within 2 seconds
+                            });
+                            
+                            if !is_duplicate {
+                                messages.push(app_msg);
+                                println!("[APP] Added WebSocket group message to group {}", group_id);
+                            } else {
+                                println!("[APP] Skipped duplicate WebSocket group message for group {}", group_id);
+                            }
+                        }
                         
                         // If we're currently viewing this chat, auto-scroll to bottom to trigger UI update
-                        if let AppState::PrivateChat(current_chat) = &self.app_state {
-                            if current_chat == &chat_key {
-                                // We're currently viewing this chat - just scroll to bottom
-                                return scrollable::snap_to(
-                                    scrollable::Id::new("messages_scroll"),
-                                    scrollable::RelativeOffset::END
-                                );
+                        if chat_msg.chat_type == "private" {
+                            if let AppState::PrivateChat(current_chat) = &self.app_state {
+                                if current_chat == &chat_key {
+                                    // We're currently viewing this private chat - scroll to bottom
+                                    return scrollable::snap_to(
+                                        scrollable::Id::new("messages_scroll"),
+                                        scrollable::RelativeOffset::END
+                                    );
+                                }
+                            }
+                        } else if chat_msg.chat_type == "group" {
+                            if let AppState::GroupChat(current_group_id, _) = &self.app_state {
+                                let group_id = chat_key.strip_prefix("group_").unwrap_or(&chat_key);
+                                if current_group_id == group_id {
+                                    // We're currently viewing this group chat - scroll to bottom
+                                    return scrollable::snap_to(
+                                        scrollable::Id::new("messages_scroll"),
+                                        scrollable::RelativeOffset::END
+                                    );
+                                }
                             }
                         }
                         

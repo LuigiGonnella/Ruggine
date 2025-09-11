@@ -38,6 +38,24 @@ pub fn view<'a>(state: &'a ChatAppState, group_id: &'a str, group_name: &'a str)
         .style(iced::theme::Button::Destructive)
         .padding(8);
 
+    // Pulsante per aggiungere membri
+    let add_member_btn = Button::new(Text::new("➕").font(EMOJI_FONT).size(16))
+        .on_press(Message::OpenInviteToGroup { 
+            group_id: group_id.to_string(), 
+            group_name: group_name.to_string() 
+        })
+        .style(iced::theme::Button::Secondary)
+        .padding(8);
+
+    // Pulsante per lasciare il gruppo
+    let leave_group_btn = Button::new(Text::new("🚪").font(EMOJI_FONT).size(16))
+        .on_press(Message::LeaveGroup { 
+            group_id: group_id.to_string(), 
+            group_name: group_name.to_string() 
+        })
+        .style(iced::theme::Button::Destructive)
+        .padding(8);
+
     let header = Container::new(
         Row::new()
             .spacing(12)
@@ -45,6 +63,8 @@ pub fn view<'a>(state: &'a ChatAppState, group_id: &'a str, group_name: &'a str)
             .push(back_btn)
             .push(group_info)
             .push(Space::new(Length::Fill, Length::Fixed(0.0)))
+            .push(add_member_btn)
+            .push(leave_group_btn)
             .push(discard_btn)
     )
     .padding([12, 16])

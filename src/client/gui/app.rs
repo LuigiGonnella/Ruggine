@@ -246,27 +246,9 @@ impl Application for ChatApp {
                 );
             }
             Msg::StartGroupMessagePolling { group_id } => {
-                if !self.state.group_polling_active {
-                    // Start group message polling (log removed)
-                    self.state.group_polling_active = true;
-                    let svc = self.chat_service.clone();
-                    let token = self.state.session_token.clone().unwrap_or_default();
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    let group_id_clone = group_id.clone();
-                    return Command::perform(
-                        async move {
-                            let mut guard = svc.lock().await;
-                            match guard.get_group_messages(&host, &token, &group_id_clone).await {
-                                Ok(messages) => Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages },
-                                Err(_) => Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages: vec![] },
-                            }
-                        },
-                        |msg| msg,
-                    );
-                } else {
-                    return Command::<Message>::none();
-                }
+                // Group messages now use WebSocket real-time updates only (no polling)
+                self.state.group_polling_active = false;
+                return Command::<Message>::none();
             }
             Msg::StopGroupMessagePolling => {
                 // Stop group polling and return to main actions view
@@ -275,52 +257,15 @@ impl Application for ChatApp {
                 return Command::<Message>::none();
             }
             Msg::NewGroupMessagesReceived { group_id, messages } => {
-                if self.state.group_polling_active {
-                    self.state.group_chats.insert(group_id.clone(), messages.to_vec());
-                    // clear loading flag when messages arrive
-                    self.state.loading_group_chats.remove(&group_id);
-                    
-                    // Continue polling
-                    let svc = self.chat_service.clone();
-                    let token = self.state.session_token.clone().unwrap_or_default();
-                    let cfg = crate::server::config::ClientConfig::from_env();
-                    let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                    let group_id_clone = group_id.clone();
-                    
-                    return Command::perform(
-                        async move {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                            let mut guard = svc.lock().await;
-                            match guard.get_group_messages(&host, &token, &group_id_clone).await {
-                                Ok(messages) => {
-                                    drop(guard);
-                                    Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages }
-                                }
-                                Err(_) => {
-                                    drop(guard);
-                                    Msg::NewGroupMessagesReceived { group_id: group_id_clone.clone(), messages: vec![] }
-                                }
-                            }
-                        },
-                        |msg| msg,
-                    );
-                } else {
-                    return Command::<Message>::none();
-                }
+                // Update group chat messages from WebSocket (no more polling)
+                self.state.group_chats.insert(group_id.clone(), messages.to_vec());
+                // clear loading flag when messages arrive
+                self.state.loading_group_chats.remove(&group_id);
+                return Command::<Message>::none();
             }
             Msg::TriggerImmediateGroupRefresh { group_id } => {
-                let cfg = crate::server::config::ClientConfig::from_env();
-                let host = format!("{}:{}", cfg.default_host, cfg.default_port);
-                let token = self.state.session_token.clone().unwrap_or_default();
-                let svc = self.chat_service.clone();
-                let group_id_cloned = group_id.clone();
-                return iced::Command::perform(
-                    async move {
-                        let mut guard = svc.lock().await;
-                        guard.get_group_messages(&host, &token, &group_id_cloned).await.unwrap_or_default()
-                    },
-                    move |messages| Msg::NewGroupMessagesReceived { group_id: group_id.clone(), messages }
-                );
+                // Group messages now use WebSocket real-time updates only (no manual refresh needed)
+                return Command::<Message>::none();
             }
             Msg::StopMessagePolling => {
                 // Stop polling and return to main actions view

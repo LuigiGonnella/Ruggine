@@ -380,7 +380,89 @@ impl ChatWebSocketManager {
                                         }
                                     }
                                     "group" => {
-                                        println!("[WS:DB] Group message handling not yet implemented via WebSocket");
+                                        if let Some(group_id) = &outgoing_msg.group_id {
+                                            println!("[WS:DB] Saving group message to database...");
+                                            let result = messages::send_group_message(
+                                                db_clone.clone(),
+                                                &session_token_clone,
+                                                group_id,
+                                                &outgoing_msg.content,
+                                                &config_clone
+                                            ).await;
+                                            println!("[WS:DB] Group message save result: {}", result);
+                                            
+                                            // If message was saved successfully, broadcast via WebSocket to all group members
+                                            if result.starts_with("OK:") {
+                                                // Get the username from user_id
+                                                let username = match sqlx::query("SELECT username FROM users WHERE id = ?")
+                                                    .bind(&user_id_clone)
+                                                    .fetch_optional(&db_clone.pool)
+                                                    .await
+                                                {
+                                                    Ok(Some(row)) => row.get::<String, _>("username"),
+                                                    Ok(None) => {
+                                                        println!("[WS:ERROR] User not found for ID: {}", user_id_clone);
+                                                        user_id_clone.clone()
+                                                    }
+                                                    Err(e) => {
+                                                        println!("[WS:ERROR] Database error getting username: {}", e);
+                                                        user_id_clone.clone()
+                                                    }
+                                                };
+                                                
+                                                // Create incoming message format for clients
+                                                let incoming_msg = serde_json::json!({
+                                                    "message_type": "new_message",
+                                                    "chat_type": "group",
+                                                    "from_user": username,
+                                                    "group_id": group_id,
+                                                    "content": outgoing_msg.content,
+                                                    "timestamp": chrono::Utc::now().timestamp()
+                                                });
+                                                
+                                                println!("[WS:BROADCAST] Broadcasting group message via WebSocket to group {}", group_id);
+                                                
+                                                // Get all group members
+                                                let group_members = match sqlx::query("SELECT user_id FROM group_members WHERE group_id = ?")
+                                                    .bind(group_id)
+                                                    .fetch_all(&db_clone.pool)
+                                                    .await
+                                                {
+                                                    Ok(rows) => {
+                                                        rows.iter().map(|row| row.get::<String, _>("user_id")).collect::<Vec<String>>()
+                                                    }
+                                                    Err(e) => {
+                                                        println!("[WS:ERROR] Error getting group members: {}", e);
+                                                        return;
+                                                    }
+                                                };
+                                                
+                                                println!("[WS:DEBUG] Group {} has {} members", group_id, group_members.len());
+                                                
+                                                // Broadcast to all group members
+                                                let user_connections_guard = user_connections_clone.lock().await;
+                                                let connections_guard = connections_clone.lock().await;
+                                                let json_msg = serde_json::to_string(&incoming_msg).unwrap_or_default();
+                                                
+                                                let mut delivered_count = 0;
+                                                for member_user_id in &group_members {
+                                                    if let Some(client_id) = user_connections_guard.get(member_user_id) {
+                                                        if let Some(connection) = connections_guard.get(client_id) {
+                                                            let _ = connection.sender.send(tokio_tungstenite::tungstenite::Message::Text(json_msg.clone()));
+                                                            delivered_count += 1;
+                                                            println!("[WS:BROADCAST] ✅ Delivered group message to user_id: {}", member_user_id);
+                                                        } else {
+                                                            println!("[WS:BROADCAST] ❌ Client ID found but connection not found for user_id {}", member_user_id);
+                                                        }
+                                                    } else {
+                                                        println!("[WS:BROADCAST] ⚠️ Group member {} not connected via WebSocket", member_user_id);
+                                                    }
+                                                }
+                                                
+                                                println!("[WS:BROADCAST] ✅ Delivered group message to {}/{} members in group {}", 
+                                                    delivered_count, group_members.len(), group_id);
+                                            }
+                                        }
                                     }
                                     _ => {
                                         println!("[WS:DB] Unknown chat_type: {}", outgoing_msg.chat_type);

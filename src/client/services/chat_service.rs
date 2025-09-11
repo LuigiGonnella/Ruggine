@@ -469,10 +469,13 @@ impl ChatService {
                     .collect();
                 Ok(members)
             }
+        } else if resp.starts_with("ERR: Not a group member") {
+            // User left the group - return specific error
+            Err(anyhow::anyhow!("NOT_A_MEMBER"))
         } else {
-            // If error or unexpected format, return empty vec (will fallback to plaintext)
+            // Other error or unexpected format
             println!("[CHAT_SERVICE] Failed to get group members: {}", resp);
-            Ok(vec![])
+            Err(anyhow::anyhow!("Failed to get group members: {}", resp))
         }
     }
 }
@@ -488,6 +491,11 @@ impl ChatService {
                 println!("[CHAT_SERVICE] Got {} members for group {}: {:?}", members.len(), group_id, members);
                 members
             }
+            Err(e) if e.to_string().contains("NOT_A_MEMBER") => {
+                // User is no longer a member of this group
+                println!("[CHAT_SERVICE] User is not a member of group {}, stopping polling", group_id);
+                return Err(anyhow::anyhow!("NOT_A_MEMBER"));
+            }
             Err(e) => {
                 println!("[CHAT_SERVICE] Failed to get group members for {}: {}, using empty participants", group_id, e);
                 vec![]
@@ -497,6 +505,11 @@ impl ChatService {
         // Then get the group messages
         let cmd = format!("/get_group_messages {} {}", session_token, group_id);
         let resp = self.send_multiline_command(host, cmd).await?;
+        
+        // Check if user is not a member
+        if resp.starts_with("ERR: Not a group member") {
+            return Err(anyhow::anyhow!("NOT_A_MEMBER"));
+        }
         
         // Parse messages with proper participants for decryption
         let msgs = message_parser::parse_group_messages_with_participants(&resp, &participants)

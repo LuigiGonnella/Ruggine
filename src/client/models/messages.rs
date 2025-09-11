@@ -3,6 +3,7 @@ use crate::client::gui::views::registration::HostType;
 #[derive(Debug, Clone)]
 pub enum Message {
     // Placeholder per tutte le azioni dell'app
+    NoOp,  // No operation - used when we need to return a message but do nothing
     Logout,
     None,
     ManualHostChanged(String),
@@ -91,6 +92,8 @@ pub enum Message {
     // Leave group
     LeaveGroup { group_id: String, group_name: String},
     LeaveGroupResult { success: bool, message: String },
+    // Error handling for group membership
+    NotAMember { group_id: String },
     // Discard messages feature
     DiscardPrivateMessages { with: String },
     DiscardGroupMessages { group_id: String },
