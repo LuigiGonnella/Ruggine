@@ -488,7 +488,6 @@ impl ChatWebSocketManager {
                                     println!("[WS:DB] Private message save result: {}", result);
                                 }
                                 MessageType::GroupMessage => {
-                                    // TODO: Implement group message saving if needed
                                     println!("[WS:DB] Group message handling not yet implemented via WebSocket");
                                 }
                                 _ => {
