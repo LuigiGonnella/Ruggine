@@ -4,42 +4,42 @@
 
 # Ruggine — Chat client/server
 
-Ruggine è una piattaforma di messaggistica moderna, end-to-end, progettata per essere sicura, modulare e operabile in ambienti di produzione. Il codice server è scritto in Rust usando Tokio e SQLx; il client desktop utilizza Iced per l'interfaccia.
+Ruggine is a modern, end-to-end messaging platform designed to be secure, modular, and production-ready. The server code is written in Rust using Tokio and SQLx; the desktop client uses Iced for the interface.
 
-Questa guida fornisce istruzioni chiare e operative su come configurare, costruire, distribuire e gestire Ruggine in produzione.
+This guide provides clear and operational instructions on how to configure, build, deploy, and manage Ruggine in production.
 
-## Sommario
-- Panoramica
-- Requisiti di produzione
-- Configurazione e gestione dei segreti
-- Build, containerizzazione e deploy
-- Operazioni, logging e monitoraggio
-- Sicurezza e gestione delle chiavi crittografiche
-- Backup, migrazioni e disaster recovery
-- Scaling e architettura di produzione
-- Troubleshooting e FAQ
-- Contribuire
+## Table of Contents
+- Overview
+- Production Requirements
+- Configuration and Secret Management
+- Build, Containerization and Deploy
+- Operations, Logging and Monitoring
+- Security and Cryptographic Key Management
+- Backup, Migrations and Disaster Recovery
+- Scaling and Production Architecture
+- Troubleshooting and FAQ
+- Contributing
 
-## Panoramica
-Ruggine gestisce chat private e di gruppo con messaggistica in tempo reale. Le conversazioni sono salvate nel database in forma cifrata (AES-256-GCM) e il server mantiene un modello di sessioni e presenza per i client connessi. 
+## Overview
+Ruggine handles private and group chats with real-time messaging. Conversations are stored in the database in encrypted form (AES-256-GCM) and the server maintains a session and presence model for connected clients.
 
-### Nuove Funzionalità v2.0
-- **WebSocket + Redis**: Messaggistica in tempo reale che sostituisce il polling del database
-- **Scalabilità migliorata**: Supporto per multiple istanze server via Redis pub/sub
-- **Latenza ridotta**: Messaggi istantanei invece di attesa polling
-- **Efficienza di rete**: Solo messaggi necessari invece di query periodiche
+### New Features v2.0
+- **WebSocket + Redis**: Real-time messaging that replaces database polling
+- **Improved Scalability**: Support for multiple server instances via Redis pub/sub
+- **Reduced Latency**: Instant messages instead of polling wait
+- **Network Efficiency**: Only necessary messages instead of periodic queries
 
-Il progetto è pensato per essere facilmente integrato in pipeline CI/CD e in infrastrutture containerizzate.
+The project is designed to be easily integrated into CI/CD pipelines and containerized infrastructures.
 
-## Requisiti di produzione
-- Toolchain: utilizzare Rust stable (compilare in CI). Bloccare le dipendenze con `Cargo.lock`.
-- Database: PostgreSQL 14+ (consigliato); SQLite è solo per sviluppo.
-- Redis: Redis 6+ per WebSocket pub/sub e caching (obbligatorio per messaging real-time).
-- TLS: certificati validi per ingress/endpoint. È raccomandato l'uso di rustls o di un reverse-proxy (nginx/traefik).
-- Secret management: Vault, AWS Secrets Manager, Azure Key Vault o equivalenti per `ENCRYPTION_MASTER_KEY` e credenziali DB.
+## Production Requirements
+- Toolchain: use stable Rust (compile in CI). Lock dependencies with `Cargo.lock`.
+- Database: PostgreSQL 14+ (recommended); SQLite is for development only.
+- Redis: Redis 6+ for WebSocket pub/sub and caching (mandatory for real-time messaging).
+- TLS: valid certificates for ingress/endpoints. Using rustls or a reverse-proxy (nginx/traefik) is recommended.
+- Secret management: Vault, AWS Secrets Manager, Azure Key Vault or equivalent for `ENCRYPTION_MASTER_KEY` and DB credentials.
 
-## Configurazione e gestione dei segreti
-I parametri principali sono gestiti tramite variabili d'ambiente (o secret mounts). Esempio minimo:
+## Configuration and Secret Management
+Main parameters are managed through environment variables (or secret mounts). Minimal example:
 
 ```powershell
 DATABASE_URL=postgres://ruggine_user:securepassword@postgres:5432/ruggine
@@ -54,21 +54,21 @@ TLS_KEY_PATH=/etc/ssl/private/ruggine.key
 LOG_LEVEL=info
 ```
 
-Linee guida operative:
-- Non salvare chiavi o credenziali nel repository né in image non protette.
-- Memorizzare `ENCRYPTION_MASTER_KEY` nel secret manager della piattaforma; caricarla al boot dell'applicazione.
-- Se si ruota la `ENCRYPTION_MASTER_KEY`, assicurarsi di avere procedura per la migrazione o per mantenere chiavi legacy per poter decrittare messaggi storici (vedi `doc/ENCRYPTION.md`).
+Operational guidelines:
+- Do not store keys or credentials in the repository or in unprotected images.
+- Store `ENCRYPTION_MASTER_KEY` in the platform's secret manager; load it at application boot.
+- When rotating `ENCRYPTION_MASTER_KEY`, ensure you have procedures for migration or to maintain legacy keys to decrypt historical messages (see `doc/ENCRYPTION.md`).
 
-## Build, containerizzazione e deploy
-Si raccomanda di costruire i binari in un job CI dedicato e di distribuire immagini Docker immutabili.
+## Build, Containerization and Deploy
+It is recommended to build binaries in a dedicated CI job and distribute immutable Docker images.
 
-- Esempio di build in CI:
+- CI build example:
 
 ```powershell
 cargo build --release --locked
 ```
 
-- Dockerfile di esempio (multi-stage):
+- Example Dockerfile (multi-stage):
 
 ```dockerfile
 FROM rust:1.70 as builder
@@ -82,45 +82,44 @@ EXPOSE 8443
 ENTRYPOINT ["/usr/local/bin/ruggine-server"]
 ```
 
-- Deployment consigliato:
-	- Per PoC: `docker-compose` con Postgres e reverse-proxy TLS.
-	- Per produzione: Kubernetes con Deployment, Service, Ingress, e Secret per `ENCRYPTION_MASTER_KEY`.
+- Recommended deployment:
+	- For PoC: `docker-compose` with Postgres and TLS reverse-proxy.
+	- For production: Kubernetes with Deployment, Service, Ingress, and Secret for `ENCRYPTION_MASTER_KEY`.
 
-## Operazioni, logging e monitoraggio
-- Logging: utilizzare formato strutturato (JSON) e centralizzare. `LOG_LEVEL` gestisce il livello di verbosità.
-- Metriche: esporre metriche compatibili Prometheus (latency, message_count, decryption_errors, active_connections).
-- Health checks: implementare `/healthz` e `/readyz` per le probe di orchestratori.
-- Backup: eseguire backup regolari del DB e testare il ripristino. Automatizzare snapshot e retention policy.
+## Operations, Logging and Monitoring
+- Logging: use structured format (JSON) and centralize. `LOG_LEVEL` manages verbosity level.
+- Metrics: expose Prometheus-compatible metrics (latency, message_count, decryption_errors, active_connections).
+- Health checks: implement `/healthz` and `/readyz` for orchestrator probes.
+- Backup: perform regular DB backups and test restoration. Automate snapshots and retention policy.
 
-## Sicurezza e gestione delle chiavi crittografiche
-- Crittografia: AES-256-GCM per i payload dei messaggi. I messaggi sono memorizzati come JSON con `nonce`, `ciphertext` e metadati.
-- Protezione chiave: mantenere `ENCRYPTION_MASTER_KEY` in un vault. L'accesso deve essere ristretto e auditabile.
-- Rotazione chiave: progettare una strategia (rolling re-encrypt, mantenimento chiavi legacy). Documentazione tecnica in `doc/ENCRYPTION.md`.
+## Security and Cryptographic Key Management
+- Encryption: AES-256-GCM for message payloads. Messages are stored as JSON with `nonce`, `ciphertext` and metadata.
+- Key protection: keep `ENCRYPTION_MASTER_KEY` in a vault. Access must be restricted and auditable.
+- Key rotation: design a strategy (rolling re-encrypt, legacy key maintenance). Technical documentation in `doc/ENCRYPTION.md`.
 
-## Backup, migrazioni e disaster recovery
-- Migrazioni: tenere le migration files versionate e applicarle in CI con controllo dello schema.
-- Recovery plan: scriptati i passi per restore DB, import della `ENCRYPTION_MASTER_KEY` e verifica integrità delle entità cifrate.
+## Backup, Migrations and Disaster Recovery
+- Migrations: keep migration files versioned and apply them in CI with schema control.
+- Recovery plan: script the steps for DB restore, `ENCRYPTION_MASTER_KEY` import and encrypted entity integrity verification.
 
-## Scaling e architettura di produzione
-- Server: stateless, scalabile orizzontalmente dietro LB.
-- Database: PostgreSQL con replica e backup; valutare partitioning per dataset massicci.
-- Consigli: caching layer (Redis) per metadati ad accesso frequente e rate-limiting su ingress.
+## Scaling and Production Architecture
+- Server: stateless, horizontally scalable behind LB.
+- Database: PostgreSQL with replica and backup; consider partitioning for massive datasets.
+- Recommendations: caching layer (Redis) for frequently accessed metadata and rate-limiting on ingress.
 
-## Troubleshooting e FAQ
-- Q: "I messaggi non si decriptano dopo un riavvio" — A: verificare `ENCRYPTION_MASTER_KEY` e cercare nel log entry con tag `[DECRYPTION FAILED]`.
-- Q: "Registrazione fallita con username già in uso" — A: server restituisce errore user-friendly `ERR: Username già in uso`.
-- Q: "Messaggi duplicati o perdita di presenza" — A: controllare il processo di polling/ack nel `ChatService` e le probe di rete.
+## Troubleshooting and FAQ
+- Q: "Messages don't decrypt after restart" — A: verify `ENCRYPTION_MASTER_KEY` and look in log for entries with tag `[DECRYPTION FAILED]`.
+- Q: "Registration failed with username already in use" — A: server returns user-friendly error `ERR: Username already in use`.
+- Q: "Duplicate messages or presence loss" — A: check polling/ack process in `ChatService` and network probes.
 
-## CI / Test suggeriti
-- Unit tests: derivazione chiavi, encrypt/decrypt, e helper crittografici.
-- Integration tests: job CI che esegue Postgres temporaneo, applica migrations e simula flussi di chat.
+## CI / Suggested Tests
+- Unit tests: key derivation, encrypt/decrypt, and cryptographic helpers.
+- Integration tests: CI job that runs temporary Postgres, applies migrations and simulates chat flows.
 
-## Contribuire
+## Contributing
 - Branching: feature/*, fix/*, release/*.
-- PR: includere descrizione, test e passi per verifica.
+- PR: include description, tests and verification steps.
 
-## Licenza e contatti
-- Inserire il file `LICENSE` nella root per chiarire termini di utilizzo (MIT/Apache-2.0 consigliate).
-- Mantainers: Luigi Gonnella & Dorotea Monaco — apri issue o PR nel repository per domande tecniche.
+## License and Contacts
+- Maintainers: Luigi Gonnella & Dorotea Monaco — open issues or PRs in the repository for technical questions.
 
 ---
