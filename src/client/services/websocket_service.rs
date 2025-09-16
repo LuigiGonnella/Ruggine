@@ -67,7 +67,7 @@ impl WebSocketService {
                             // Invece di usare il receiver come sender, salviamo il messaggio in un buffer
                             // Per ora, stampiamo il messaggio ricevuto
                             println!("[WS:CLIENT] Received message: {:?}", ws_message);
-                            // TODO: Implementare un buffer per i messaggi ricevuti
+                        
                         }
                     }
                     Ok(Message::Close(_)) => {
@@ -97,7 +97,7 @@ impl WebSocketService {
     pub async fn send_private_message(&self, to: &str, content: &str) -> anyhow::Result<()> {
         // For now, we don't have the sender info in this context
         // This should be set when the user authenticates
-        let sender = "unknown"; // TODO: Get from authentication context
+        let sender = "unknown"; 
         
         let message = WebSocketMessage {
             id: uuid::Uuid::new_v4().to_string(),
@@ -113,7 +113,7 @@ impl WebSocketService {
 
     pub async fn send_group_message(&self, group_id: &str, content: &str) -> anyhow::Result<()> {
         // For now, we don't have the sender info in this context
-        let sender = "unknown"; // TODO: Get from authentication context
+        let sender = "unknown"; 
         
         let message = WebSocketMessage {
             id: uuid::Uuid::new_v4().to_string(),
