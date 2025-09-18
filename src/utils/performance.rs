@@ -19,6 +19,7 @@ pub async fn start_performance_logger(db: Arc<Database>, log_path: &str) {
             return;
         }
     };
+    
 
     // Write header if file is empty
     if file.metadata().map(|m| m.len()).unwrap_or(0) == 0 {
@@ -36,7 +37,9 @@ pub async fn start_performance_logger(db: Arc<Database>, log_path: &str) {
     loop {
         system.refresh_all();
         let cpu_usage = system.cpus().iter().map(|c| c.cpu_usage()).sum::<f32>() / system.cpus().len() as f32;
-        let timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+        // Use local time (UTC+2 for Italy) instead of UTC for presentation
+        let local_time = Utc::now() + chrono::Duration::hours(2);
+        let timestamp = local_time.format("%Y-%m-%d %H:%M:%S UTC");
 
         // Query DB for stats with error handling
         let active_users = match sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE is_online = 1")

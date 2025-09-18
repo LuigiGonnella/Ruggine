@@ -39,16 +39,43 @@ impl ChatService {
     
     /// Reset the service by dropping existing connections and background tasks
     pub async fn reset(&mut self) {
+        println!("[CHAT_SERVICE] 🔄 Resetting ChatService - dropping all connections");
         self.tx = None;
         self._bg = None;
         self.websocket = None;
         self.current_user = None;
         self.websocket_receiver = None;
+        println!("[CHAT_SERVICE] ✅ Reset completed");
+    }
+
+    /// Logout from server and reset local state
+    pub async fn logout(&mut self, host: &str, session_token: &str) -> anyhow::Result<()> {
+        println!("[CHAT_SERVICE] 🚪 Logging out from server");
+        
+        // Call server logout command first
+        let cmd = format!("/logout {}", session_token);
+        match self.send_command(host, cmd).await {
+            Ok(response) => {
+                println!("[CHAT_SERVICE] 🚪 Server logout response: {}", response);
+            }
+            Err(e) => {
+                println!("[CHAT_SERVICE] ⚠️ Server logout failed: {}, continuing with local cleanup", e);
+            }
+        }
+        
+        // Then reset local state
+        self.reset().await;
+        println!("[CHAT_SERVICE] 🚪 Logout completed");
+        Ok(())
     }
 
     /// Initialize WebSocket connection
     pub async fn connect_websocket(&mut self, ws_host: &str, ws_port: u16, session_token: &str) -> anyhow::Result<()> {
         let ws_url = format!("ws://{}:{}", ws_host, ws_port);
+        println!("[CHAT_SERVICE] 🔌 Starting WebSocket connection to {}", ws_url);
+        
+        // Reset any existing WebSocket connection
+        self.reset().await;
         
         // Create new WebSocket client
         let mut ws_client = WebSocketClient::new(ws_url.clone());
@@ -56,6 +83,7 @@ impl ChatService {
         
         // Get the receiver before connecting
         self.websocket_receiver = ws_client.take_receiver();
+        println!("[CHAT_SERVICE] 📥 WebSocket receiver created");
         
         // Connect and authenticate
         ws_client.connect_with_auth().await.map_err(|e| anyhow::anyhow!("WebSocket connection failed: {}", e))?;
@@ -63,30 +91,29 @@ impl ChatService {
         // Store the connected client
         self.websocket = Some(ws_client);
         
-        println!("[CHAT_SERVICE] WebSocket connected to {}", ws_url);
+        println!("[CHAT_SERVICE] ✅ WebSocket fully connected and authenticated to {}", ws_url);
         Ok(())
     }
 
     /// Get the next WebSocket message if available
     pub async fn try_receive_websocket_message(&mut self) -> Option<WebSocketMessage> {
         if let Some(ref mut receiver) = self.websocket_receiver {
-            println!("[CHAT_SERVICE] Checking for WebSocket messages...");
             match receiver.try_recv() {
                 Ok(msg) => {
-                    println!("[CHAT_SERVICE] Found WebSocket message: {:?}", msg);
+                    println!("[CHAT_SERVICE] 📩 Received WebSocket message: {:?}", msg);
                     Some(msg)
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                    // No messages available right now
+                    // No messages available right now - don't log this to reduce spam
                     None
                 }
                 Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                    println!("[CHAT_SERVICE] WebSocket receiver disconnected!");
+                    println!("[CHAT_SERVICE] ❌ WebSocket receiver disconnected!");
                     None
                 }
             }
         } else {
-            println!("[CHAT_SERVICE] No WebSocket receiver available");
+            // No receiver available - WebSocket not connected, don't spam logs
             None
         }
     }
@@ -103,6 +130,17 @@ impl ChatService {
     /// Check if WebSocket is connected
     pub async fn is_websocket_connected(&self) -> bool {
         self.websocket.is_some()
+    }
+
+    /// Update the session token of an existing WebSocket connection
+    pub async fn update_websocket_token(&mut self, new_token: &str) -> anyhow::Result<()> {
+        if let Some(ref mut ws_client) = self.websocket {
+            ws_client.set_session_token(new_token.to_string());
+            println!("[CHAT_SERVICE] Updated WebSocket session token");
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("No WebSocket connection to update"))
+        }
     }
 
     /// Ensure there is an active background task connected to `host`.
@@ -137,12 +175,6 @@ impl ChatService {
                     CommandType::MultiLine(cmd) => (cmd, true),
                 };
 
-                // Log outgoing
-                if cmd.starts_with("/logout") {
-                    println!("[CLIENT:SVC] Sending logout command (redacted)");
-                } else {
-                    println!("[CLIENT:SVC] Sending command: {}", cmd);
-                }
 
                 // Attempt to send this command and receive a response.
                 // If the connection is dropped at any point, try to reconnect and

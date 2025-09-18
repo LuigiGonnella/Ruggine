@@ -7,7 +7,6 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1.37", features = ["full"] }
 iced = { version = "0.12", features = ["tokio", "debug"] }
-iced_aw = "0.9.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }

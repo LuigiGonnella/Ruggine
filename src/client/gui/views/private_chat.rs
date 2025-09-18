@@ -30,7 +30,6 @@ pub fn view<'a>(state: &'a ChatAppState, username: &'a str) -> Element<'a, Messa
 
     let user_info = Column::new()
         .push(Text::new(username).font(BOLD_FONT).size(20).style(TEXT_PRIMARY))
-        .push(Text::new("Online").size(12).style(TEXT_SECONDARY))
         .spacing(2);
 
     let discard_btn = Button::new(Text::new("🗑️").font(EMOJI_FONT).size(16))
@@ -95,7 +94,7 @@ fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Elemen
         if chat_messages.is_empty() {
             messages_column = messages_column.push(
                 Container::new(
-                    Text::new("Nessun messaggio ancora. Inizia la conversazione!")
+                    Text::new("No messages yet. Start the conversation!")
                         .size(14)
                         .style(TEXT_SECONDARY)
                 )
@@ -105,7 +104,7 @@ fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Elemen
             );
         } else {
             for (i, msg) in chat_messages.iter().enumerate() {
-                println!("[PRIVATE_CHAT_VIEW] Message {}: {} -> {}", i, msg.sender, msg.content);
+                // println!("[PRIVATE_CHAT_VIEW] Message {}: {} -> {}", i, msg.sender, msg.content);
                 let is_my_message = msg.sender == state.username;
                 let message_bubble = create_message_bubble(msg, is_my_message);
                 messages_column = messages_column.push(message_bubble);
@@ -113,7 +112,7 @@ fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Elemen
         }
     } else if state.loading_private_chats.contains(username) {
         // Currently loading - show loading indicator
-        println!("[PRIVATE_CHAT_VIEW] Loading messages for {}", username);
+        // println!("[PRIVATE_CHAT_VIEW] Loading messages for {}", username);
         messages_column = messages_column.push(
             Container::new(
                 Text::new("Caricamento messaggi...")
@@ -126,10 +125,10 @@ fn build_messages_area<'a>(state: &'a ChatAppState, username: &'a str) -> Elemen
         );
     } else {
         // No messages cached and not loading - show empty state
-        println!("[PRIVATE_CHAT_VIEW] No messages and not loading for {}", username);
+        // println!("[PRIVATE_CHAT_VIEW] No messages and not loading for {}", username);
         messages_column = messages_column.push(
             Container::new(
-                Text::new("Nessun messaggio ancora. Inizia la conversazione!")
+                Text::new("No messages yet. Start the conversation!")
                     .size(14)
                     .style(TEXT_SECONDARY)
             )

@@ -189,6 +189,45 @@ pub async fn list_online(db: Arc<Database>) -> String {
     }
 }
 
+pub async fn list_online_excluding_self(db: Arc<Database>, session_token: &str) -> String {
+    println!("[USERS] Listing online users excluding current user");
+    
+    // First validate session and get current user ID
+    let current_user_id = match crate::server::auth::validate_session(db.clone(), session_token).await {
+        Some(uid) => uid,
+        None => return "ERR: Invalid or expired session".to_string(),
+    };
+    
+    // Get current user's username
+    let current_username = match sqlx::query("SELECT username FROM users WHERE id = ?")
+        .bind(&current_user_id)
+        .fetch_optional(&db.pool)
+        .await
+    {
+        Ok(Some(row)) => row.get::<String,_>("username"),
+        Ok(None) => return "ERR: User not found".to_string(),
+        Err(e) => return format!("ERR: Database error: {}", e),
+    };
+    
+    // Get all online users except current user
+    let rows = sqlx::query("SELECT username FROM users WHERE is_online = 1 AND id != ?")
+        .bind(&current_user_id)
+        .fetch_all(&db.pool)
+        .await;
+    
+    match rows {
+        Ok(rows) => {
+            let users: Vec<String> = rows.iter().map(|r| r.get::<String,_>("username")).collect();
+            println!("[USERS] Found {} online users excluding {}", users.len(), current_username);
+            format!("OK: Online users: {}", users.join(", "))
+        }
+        Err(e) => {
+            println!("[USERS] Error listing online users: {}", e);
+            format!("ERR: {}", e)
+        }
+    }
+}
+
 pub async fn list_all(db: Arc<Database>, exclude_username: Option<&str>) -> String {
     println!("[USERS] Listing all users");
     let rows = sqlx::query("SELECT username FROM users")

@@ -248,6 +248,11 @@ impl WebSocketClient {
         }
     }
 
+   
+
+
+
+
     /// Gestisce i messaggi in arrivo dal WebSocket in background
     async fn handle_incoming_messages(
         mut ws_receiver: futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>,

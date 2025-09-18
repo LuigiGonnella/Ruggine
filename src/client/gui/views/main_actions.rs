@@ -162,7 +162,6 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
         .style(iced::theme::Container::Custom(Box::new(header_appearance)));
 
     // User info section
-    println!("🟠 [DEBUG] MainActions rendering - state.username: '{}'", state.username);
     let user_info = Container::new(
         Row::new()
             .spacing(8)
@@ -196,11 +195,11 @@ pub fn view(state: &ChatAppState) -> Element<Message> {
 
     let invites_card = action_card(
         "✉️",
-        "Invites to groups", 
-        "See pending group invites and accept or reject",
-        "View Invites",
+        "Invites", 
+        "See pending group invites and friend requests",
+        "View Group Invites",
         Message::OpenMyGroupInvites,
-        Some(("Friend Requests", Message::OpenFriendRequests))
+        Some(("View Friend Requests", Message::OpenFriendRequests))
     );
 
     let friends_card = action_card(

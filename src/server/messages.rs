@@ -410,6 +410,11 @@ pub async fn get_private_messages(db: Arc<Database>, session_token: &str, other_
         .flatten()
         .map(|row| row.get::<i64, _>("deleted_at"));
     
+    // Force WAL checkpoint to ensure we see the latest messages from WebSocket connections
+    let _ = sqlx::query("PRAGMA wal_checkpoint;")
+        .execute(&db.pool)
+        .await;
+    
     let rows = sqlx::query("SELECT sender_id, message, sent_at FROM encrypted_messages WHERE chat_id = ? ORDER BY sent_at ASC")
         .bind(&chat_id)
         .fetch_all(&db.pool)

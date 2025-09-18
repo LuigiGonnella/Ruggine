@@ -91,6 +91,7 @@ pub fn parse_private_messages_with_participants(resp: &str, participants: &[Stri
                                 timestamp,
                                 formatted_time,
                                 sent_at: timestamp,
+                                is_pending: false,  // HTTP messages are confirmed by server
                             });
                         }
                     }
@@ -163,6 +164,7 @@ pub fn parse_group_messages_with_participants(resp: &str, participants: &[String
                                 timestamp,
                                 formatted_time,
                                 sent_at: timestamp,
+                                is_pending: false,  // HTTP messages are confirmed by server
                             });
                         }
                     }

@@ -112,7 +112,7 @@ fn build_messages_area<'a>(state: &'a ChatAppState, group_id: &'a str) -> Elemen
         if chat_messages.is_empty() {
             messages_column = messages_column.push(
                 Container::new(
-                    Text::new("Nessun messaggio ancora. Inizia la conversazione!")
+                    Text::new("No messages yet. Start the conversation!")
                         .size(14)
                         .style(TEXT_SECONDARY)
                 )

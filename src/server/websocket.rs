@@ -256,6 +256,13 @@ impl ChatWebSocketManager {
             user_connections.insert(user_id.clone(), client_id.clone());
         }
 
+        // Set user online when WebSocket connects
+        let _ = sqlx::query("UPDATE users SET is_online = 1 WHERE id = ?")
+            .bind(&user_id)
+            .execute(&db.pool)
+            .await;
+        println!("[WS:ONLINE] Set is_online=1 for user {} due to WebSocket connection", user_id);
+
         let connections_clone = self.connections.clone();
         let user_connections_clone = self.user_connections.clone();
         let client_id_clone = client_id.clone();
@@ -299,6 +306,14 @@ impl ChatWebSocketManager {
                                                 &config_clone
                                             ).await;
                                             println!("[WS:DB] Private message save result: {}", result);
+                                            
+                                            // Force database synchronization to ensure immediate visibility
+                                            if result.starts_with("OK:") {
+                                                let _ = sqlx::query("PRAGMA wal_checkpoint;")
+                                                    .execute(&db_clone.pool)
+                                                    .await;
+                                                println!("[WS:DB] Database WAL checkpoint completed");
+                                            }
                                             
                                             // If message was saved successfully, broadcast via WebSocket
                                             if result.starts_with("OK:") {
@@ -488,6 +503,7 @@ impl ChatWebSocketManager {
                                     println!("[WS:DB] Private message save result: {}", result);
                                 }
                                 MessageType::GroupMessage => {
+                                    // TODO: Implement group message saving if needed
                                     println!("[WS:DB] Group message handling not yet implemented via WebSocket");
                                 }
                                 _ => {
@@ -529,6 +545,19 @@ impl ChatWebSocketManager {
                 
                 connections.remove(&client_id_clone);
                 user_connections.remove(&user_id_clone);
+                
+                // Set user offline when WebSocket disconnects (only if no other WebSocket connections)
+                if !user_connections.values().any(|cid| {
+                    connections.get(cid).map_or(false, |conn| conn.user_id == user_id_clone)
+                }) {
+                    let _ = sqlx::query("UPDATE users SET is_online = 0 WHERE id = ?")
+                        .bind(&user_id_clone)
+                        .execute(&db_clone.pool)
+                        .await;
+                    println!("[WS:OFFLINE] Set is_online=0 for user {} due to WebSocket disconnection", user_id_clone);
+                } else {
+                    println!("[WS:ONLINE] User {} still has other WebSocket connections, keeping online", user_id_clone);
+                }
             }
         });
 
@@ -580,6 +609,26 @@ impl ChatWebSocketManager {
 
     pub fn subscribe(&self) -> broadcast::Receiver<WebSocketMessage> {
         self.message_broadcaster.subscribe()
+    }
+
+    /// Disconnette e rimuove tutte le connessioni WebSocket per un utente specifico
+    pub async fn disconnect_user(&self, user_id: &str) {
+        println!("[WS:CLEANUP] Disconnecting all WebSocket connections for user: {}", user_id);
+        
+        let mut connections = self.connections.lock().await;
+        let mut user_connections = self.user_connections.lock().await;
+        
+        // Trova il client_id per questo user_id
+        if let Some(client_id) = user_connections.remove(user_id) {
+            // Chiudi la connessione inviando un messaggio di chiusura
+            if let Some(connection) = connections.remove(&client_id) {
+                // Invia messaggio di chiusura (questo farà terminare il task del WebSocket)
+                let _ = connection.sender.send(tokio_tungstenite::tungstenite::Message::Close(None));
+                println!("[WS:CLEANUP] Sent close message to WebSocket connection for user: {}", user_id);
+            }
+        } else {
+            println!("[WS:CLEANUP] No active WebSocket connection found for user: {}", user_id);
+        }
     }
 
     pub async fn start_redis_subscriber(&self) -> anyhow::Result<()> {

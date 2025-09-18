@@ -265,12 +265,23 @@ pub async fn validate_session(db: Arc<Database>, session_token: &str) -> Option<
         .fetch_optional(&db.pool)
         .await
         .ok()?;
-    if row.is_some() {
-        println!("[AUTH] validate_session: token {} is valid", session_token);
+    
+    if let Some(row) = row {
+        let user_id: String = row.get("user_id");
+        println!("[AUTH] validate_session: token {} is valid for user {}", session_token, user_id);
+        
+        // Set user online when session is validated (for auto-login scenarios)
+        let _ = sqlx::query("UPDATE users SET is_online = 1 WHERE id = ?")
+            .bind(&user_id)
+            .execute(&db.pool)
+            .await;
+        println!("[AUTH] Set is_online=1 for user {} due to session validation", user_id);
+        
+        Some(user_id)
     } else {
         println!("[AUTH] validate_session: token {} is invalid or expired", session_token);
+        None
     }
-    row.map(|r| r.get::<String,_>("user_id"))
 }
 
 /// Rimuove le sessioni scadute dal DB. Idempotente e sicuro da eseguire periodicamente.

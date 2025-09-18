@@ -67,7 +67,7 @@ impl WebSocketService {
                             // Invece di usare il receiver come sender, salviamo il messaggio in un buffer
                             // Per ora, stampiamo il messaggio ricevuto
                             println!("[WS:CLIENT] Received message: {:?}", ws_message);
-                        
+                            
                         }
                     }
                     Ok(Message::Close(_)) => {

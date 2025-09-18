@@ -34,11 +34,19 @@ async fn main() -> anyhow::Result<()> {
     })?;
     info!("✅ Database migrations completed successfully");
     
+    // Initialize WebSocket manager with Redis
+    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let ws_manager = Arc::new(ChatWebSocketManager::new(&redis_url).await?);
+    
+    // Start Redis subscriber for cross-instance messaging
+    ws_manager.start_redis_subscriber().await?;
+    
     let presence = ruggine_modulare::server::presence::PresenceRegistry::new();
-    let server = Server { 
+    let mut server = Server { 
         db: database.clone(), 
         config: config.clone(), 
-        presence 
+        presence,
+        ws_manager: Some(ws_manager.clone()),
     };
 
     // Start performance logger in background
@@ -50,13 +58,6 @@ async fn main() -> anyhow::Result<()> {
         performance::start_performance_logger(perf_db, &perf_log_path).await;
     });
 
-    // Initialize WebSocket manager with Redis
-    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
-    let ws_manager = Arc::new(ChatWebSocketManager::new(&redis_url).await?);
-    
-    // Start Redis subscriber for cross-instance messaging
-    ws_manager.start_redis_subscriber().await?;
-    
     // Start WebSocket server on a different port
     let ws_port = config.port + 1; // WebSocket su porta +1 rispetto al server principale
     let ws_host = config.host.clone();

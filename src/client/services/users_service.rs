@@ -9,9 +9,9 @@ impl UsersService {
     pub fn new() -> Self { Self {} }
 
     /// List online users. Returns Vec<String> of usernames on success.
-    pub async fn list_online(svc: &Arc<Mutex<ChatService>>, host: &str) -> anyhow::Result<Vec<String>> {
+    pub async fn list_online(svc: &Arc<Mutex<ChatService>>, host: &str, session_token: &str) -> anyhow::Result<Vec<String>> {
         let mut guard = svc.lock().await;
-        let cmd = "/online_users".to_string();
+        let cmd = format!("/online_users {}", session_token);
         let resp = guard.send_command(host, cmd).await?;
         if !resp.starts_with("OK:") {
             return Err(anyhow::anyhow!(resp));

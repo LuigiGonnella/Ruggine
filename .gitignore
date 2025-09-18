@@ -38,5 +38,3 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
-*.env
-.env

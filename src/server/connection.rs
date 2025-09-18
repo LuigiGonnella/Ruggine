@@ -1,4 +1,4 @@
-use crate::server::{database::Database, auth, users, groups, messages, presence::PresenceRegistry};
+use crate::server::{database::Database, auth, users, groups, messages, presence::PresenceRegistry, websocket::ChatWebSocketManager};
 use sqlx::Row;
 use crate::server::config::ServerConfig;
 use std::sync::Arc;
@@ -16,6 +16,7 @@ pub struct Server {
     pub db: Arc<Database>,
     pub config: ServerConfig,
     pub presence: PresenceRegistry,
+    pub ws_manager: Option<Arc<ChatWebSocketManager>>,
 }
 
 impl Server {
@@ -190,6 +191,12 @@ impl Server {
                 // attempt to resolve user_id first so we can kick presence after logout
                 if let Some(uid) = auth::validate_session(self.db.clone(), token).await {
                     println!("[AUTH] Handling /logout for user {} (token masked)", uid);
+                    
+                    // Disconnect WebSocket connections for this user BEFORE logout
+                    if let Some(ws_manager) = &self.ws_manager {
+                        ws_manager.disconnect_user(&uid).await;
+                    }
+                    
                     let res = auth::logout(self.db.clone(), token).await;
                     // After logout, query DB to report current sessions count and is_online state for debugging
                     let sess_cnt = sqlx::query("SELECT COUNT(1) as c FROM sessions WHERE user_id = ?")
@@ -243,8 +250,9 @@ impl Server {
             "/login" if args.len() == 2 => {
                 auth::login(self.db.clone(), args[0], args[1], &self.config).await
             }
-            "/online_users" => {
-                users::list_online(self.db.clone()).await
+            "/online_users" if args.len() == 1 => {
+                let session_token = args[0];
+                users::list_online_excluding_self(self.db.clone(), session_token).await
             }
             "/all_users" => {
                 let exclude = None;
@@ -411,7 +419,7 @@ async fn handle_client(db: Arc<Database>, config: ServerConfig, stream: TcpStrea
         let cmd = parts.next().unwrap_or("");
         let args: Vec<&str> = parts.collect();
         println!("[CONN] [{}] Cmd='{}' Args={:?}", peer, cmd, args);
-        let server = Server { db: db.clone(), config: config.clone(), presence: presence.clone() };
+        let server = Server { db: db.clone(), config: config.clone(), presence: presence.clone(), ws_manager: None };
         let response = server.handle_command(cmd, &args).await;
         println!("[CONN] [{}] Response: {}", peer, response);
         // If the client just validated an existing session, register presence so
@@ -556,7 +564,7 @@ where
         let mut parts = trimmed.split_whitespace();
         let cmd = parts.next().unwrap_or("");
         let args: Vec<&str> = parts.collect();
-        let server = Server { db: db.clone(), config: config.clone(), presence: presence.clone() };
+        let server = Server { db: db.clone(), config: config.clone(), presence: presence.clone(), ws_manager: None };
         let response = server.handle_command(cmd, &args).await;
         // If the client just validated an existing session, register presence so
         // we treat this TLS connection as an active one (preserve session row for auto-login
